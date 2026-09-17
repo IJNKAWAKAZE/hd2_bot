@@ -13,9 +13,23 @@ import (
 	"hd2_bot/src/bestiary"
 )
 
-// fixtureJSON 是一份小目录：主武器（弹匣 / 射速 / 射击模式 / 穿甲 / 军需簿来源）、
+func TestEnemyEmblemMatchesFaction(t *testing.T) {
+	for _, tc := range []struct{ faction, emblem string }{
+		{bestiary.FactionAutomaton, "emblem.automaton"},
+		{bestiary.FactionTerminid, "emblem.terminids"},
+		{bestiary.FactionIlluminate, "emblem.illuminate"},
+		{"", ""},
+	} {
+		card := BuildEnemyCard(bestiary.Result{Enemies: []bestiary.Enemy{{Title: "Test", Faction: tc.faction}}}, "Test", EnemyImages{}, nil, time.Time{})
+		if card.Emblem != tc.emblem {
+			t.Errorf("faction %q: emblem %q, want %q", tc.faction, card.Emblem, tc.emblem)
+		}
+	}
+}
+
+// fixtureJSON 是一份小目录：主武器（弹匣 / 射速 / 射击模式 / 穿甲 / 债券来源）、
 // 战备（召唤指令 + 冷却 + 征用点来源）、护甲（等级 / 护甲值 / 速度 / 耐力回复 / 被动）、
-// 手雷（默认解锁），以及两本军需簿。字段名与上游一致，改错 tag 时这些用例会红。
+// 手雷（默认解锁），以及两本债券。字段名与上游一致，改错 tag 时这些用例会红。
 const fixtureJSON = `{
   "meta": {"game": "HELLDIVERS 2", "dataVersion": "2026.08.14.1", "capturedAt": "2026-08-14T03:25:51.159Z"},
   "warbonds": [
@@ -137,7 +151,7 @@ func TestModesText(t *testing.T) {
 	}
 }
 
-// TestAcquisitionText 校验获取方式：军需簿要把书名/页码/勋章写清，征用点要写价格与等级要求，
+// TestAcquisitionText 校验获取方式：债券要把书名/页码/勋章写清，征用点要写价格与等级要求，
 // 其余类别用目录里的中文名，未知类别原样显示。
 func TestAcquisitionText(t *testing.T) {
 	catalog := mustCatalog(t)
@@ -147,8 +161,8 @@ func TestAcquisitionText(t *testing.T) {
 		catalog *arsenal.Catalog
 		want    string
 	}{
-		{"军需簿按 id 查中文名", arsenal.Item{Acq: arsenal.Acquisition{Kind: "warbond", WarbondID: "dust-devils", Page: 1, ItemMedals: 35}}, catalog, "军需簿「沙漠魔影」 · 第 1 页 · 35 勋章"},
-		{"军需簿 id 未知时保留原值", arsenal.Item{Acq: arsenal.Acquisition{Kind: "warbond", WarbondID: "ghost"}}, catalog, "军需簿「ghost」"},
+		{"债券按 id 查中文名", arsenal.Item{Acq: arsenal.Acquisition{Kind: "warbond", WarbondID: "dust-devils", Page: 1, ItemMedals: 35}}, catalog, "债券「沙漠魔影」 · 第 1 页 · 35 勋章"},
+		{"债券 id 未知时保留原值", arsenal.Item{Acq: arsenal.Acquisition{Kind: "warbond", WarbondID: "ghost"}}, catalog, "债券「ghost」"},
 		{"征用点写价格与等级", arsenal.Item{Acq: arsenal.Acquisition{Kind: "requisition", RequisitionPoints: 6000, LevelRequired: 13}}, nil, "征用点 · 6,000 · 需等级 13"},
 		{"征用点缺数值时不写多余分隔", arsenal.Item{Acq: arsenal.Acquisition{Kind: "requisition"}}, nil, "征用点"},
 		{"默认解锁", arsenal.Item{Acq: arsenal.Acquisition{Kind: "default"}}, nil, "默认解锁"},
@@ -198,7 +212,7 @@ func TestCreditsText(t *testing.T) {
 }
 
 // ---- 装备卡片 ----
-// ---- 军需簿卡片 ----
+// ---- 债券卡片 ----
 
 // TestFindWarbond 校验查找顺序：精确（中文名/英文名/id）→ 前缀 → 包含；空关键字与未命中都返回 false。
 func TestFindWarbond(t *testing.T) {
@@ -211,8 +225,8 @@ func TestFindWarbond(t *testing.T) {
 		{"沙漠魔影", "dust-devils", true},
 		{"dust devils", "dust-devils", true},
 		{"mobilize", "mobilize", true},
-		{"沙漠", "dust-devils", true},
-		{"魔影", "dust-devils", true},
+		{"沙漠", "", false},
+		{"魔影", "", false},
 		{"  ", "", false},
 		{"不存在的本", "", false},
 	}
@@ -233,11 +247,11 @@ func TestBuildWarbondsCardList(t *testing.T) {
 	if card.Detail != nil {
 		t.Fatal("不带关键字时不该出明细")
 	}
-	if !strings.Contains(card.Intro, "全部军需簿") {
-		t.Errorf("名单开头应说明这是全部军需簿：%q", card.Intro)
+	if !strings.Contains(card.Intro, "全部债券") {
+		t.Errorf("名单开头应说明这是全部债券：%q", card.Intro)
 	}
 	if len(card.Books) != 2 {
-		t.Fatalf("夹具里有两本军需簿，实际 %d 本", len(card.Books))
+		t.Fatalf("夹具里有两本债券，实际 %d 本", len(card.Books))
 	}
 	first := card.Books[0]
 	if first.Name != "绝地潜兵总动员！" || first.English != "Helldivers Mobilize!" {
@@ -247,7 +261,7 @@ func TestBuildWarbondsCardList(t *testing.T) {
 		t.Errorf("第一本的页数/勋章/件数错误：%+v", first)
 	}
 	if first.Credits != "—" {
-		t.Errorf("不单卖的军需簿价格应写「—」，实际 %q", first.Credits)
+		t.Errorf("不单卖的债券价格应写「—」，实际 %q", first.Credits)
 	}
 	if card.Books[1].Credits != "1,000" || card.Books[1].Items != "1 件" {
 		t.Errorf("第二本的价格/件数错误：%+v", card.Books[1])
@@ -263,7 +277,7 @@ func TestBuildWarbondsCardDetailAndMiss(t *testing.T) {
 	}
 	detail := BuildWarbondDetail(book, catalog.ItemsOfWarbond(book.ID), catalog)
 	hit := BuildWarbondsCard(catalog.Warbonds(), detail, "沙漠魔影", time.Time{})
-	if hit.Detail == nil || !strings.Contains(hit.Intro, "沙漠魔影") {
+	if hit.Detail == nil || hit.Intro != "" {
 		t.Fatalf("命中时应出明细并写明关键字：%+v", hit.Intro)
 	}
 	if len(hit.Books) != 0 {
@@ -274,7 +288,7 @@ func TestBuildWarbondsCardDetailAndMiss(t *testing.T) {
 	if miss.Detail != nil {
 		t.Error("没命中时不该出明细")
 	}
-	if !strings.Contains(miss.Intro, "没有找到匹配") {
+	if !strings.Contains(miss.Intro, "没有找到") {
 		t.Errorf("没命中时开头应说明没找到：%q", miss.Intro)
 	}
 	if len(miss.Books) != 2 {
@@ -301,7 +315,7 @@ func TestBuildWarbondDetail(t *testing.T) {
 		t.Errorf("明细条目错误：%+v", item)
 	}
 	if !strings.Contains(item.Acquire, "沙漠魔影") {
-		t.Errorf("明细条目应写明来源军需簿：%q", item.Acquire)
+		t.Errorf("明细条目应写明来源债券：%q", item.Acquire)
 	}
 }
 
@@ -328,14 +342,14 @@ func TestBuildWarbondDetailDropsRepeatedEnglishName(t *testing.T) {
 	}
 }
 
-// TestBuildWarbondsCardEmpty 校验目录里没有军需簿时给出的提示。
+// TestBuildWarbondsCardEmpty 校验目录里没有债券时给出的提示。
 func TestBuildWarbondsCardEmpty(t *testing.T) {
 	card := BuildWarbondsCard(nil, nil, "", time.Time{})
 	if card.Empty == "" {
-		t.Fatal("没有军需簿时应给出提示")
+		t.Fatal("没有债券时应给出提示")
 	}
 	if len(card.Books) != 0 {
-		t.Errorf("没有军需簿时名单应为空，实际 %d 本", len(card.Books))
+		t.Errorf("没有债券时名单应为空，实际 %d 本", len(card.Books))
 	}
 }
 
@@ -388,7 +402,7 @@ func TestBuildEquipmentDetailWeapon(t *testing.T) {
 	if detail.Image != "data:image/png;base64,AAA" {
 		t.Errorf("详情头部应带上装备图：%q", detail.Image)
 	}
-	if detail.Acquire != "军需簿「沙漠魔影」 · 第 1 页 · 35 勋章" {
+	if detail.Acquire != "债券「沙漠魔影」 · 第 1 页 · 35 勋章" {
 		t.Errorf("获取方式错误：%q", detail.Acquire)
 	}
 	if len(detail.Arrows) != 0 {

@@ -11,7 +11,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -81,6 +80,14 @@ func run() int {
 	// bot.name 与 bot.debug 只用于启动日志：S1 没有需要区分的运行模式。
 	log.Printf("配置加载完成：bot=%s owner=%d group=%d debug=%v http=%s:%d db=%s",
 		cfg.Bot.Name, cfg.Bot.Owner, cfg.Bot.GroupID, cfg.Bot.Debug, cfg.HTTP.Host, cfg.HTTP.Port, statePath)
+	if cfg.Render.Enabled {
+		log.Print("检查 Playwright 驱动和 Chromium，缺失时自动安装，首次启动可能需要等待下载")
+		if err := render.PrepareRuntime(); err != nil {
+			log.Printf("图片运行环境准备失败：%v；继续启动，渲染失败时回退文本", err)
+		} else {
+			log.Print("Playwright 驱动和 Chromium 已就绪")
+		}
+	}
 
 	// 状态存储：Service 用它保存快照做降级兜底，S4 的推送去重也会用它。
 	store, err := state.Open(statePath)
@@ -113,11 +120,9 @@ func run() int {
 		return 1
 	}
 
-	// Telegram 机器人：只服务配置里指定的群；文本按 bot.msg_del_delay、图片按 bot.photo_del_delay
-	// 延迟删除（都为 0 表示保留）。
+	// Telegram 机器人：只服务配置里指定的群；仅 /ping 清理指令与回复，其他消息保留。
 	tgBot, err := bot.New(cfg.Bot.Token, cfg.Bot.Owner, cfg.Bot.GroupID,
-		time.Duration(cfg.Bot.MsgDelDelay*float64(time.Second)),
-		time.Duration(cfg.Bot.PhotoDelDelay*float64(time.Second)))
+		time.Duration(cfg.Bot.MsgDelDelay*float64(time.Second)))
 	if err != nil {
 		log.Printf("启动失败：%v", err)
 		closeState(store)
@@ -147,7 +152,7 @@ func run() int {
 	// 交给插件与推送的翻译层要经 pluginTranslator 过一道：关闭翻译时给 nil，
 	// 而不是把「用户主动关掉」说成「翻译暂不可用」（理由见该函数的注释）。
 	pluginTrans := pluginTranslator(cfg, trans)
-	registerPlugins(tgBot, svc, renderer, display, cfg.Inline.Prefix, pluginTrans, gearStore, beastStore)
+	registerPlugins(tgBot, svc, renderer, display, pluginTrans, gearStore, beastStore)
 
 	// 定时任务：心跳 + （可选）战况推送。推送轮询与心跳错开 15 秒，避免同一秒并发取数。
 	jobs := buildPushJobs(cfg, svc, store, tgBot, renderer, pluginTrans, display, log.Printf)
@@ -202,32 +207,15 @@ func run() int {
 // 各插件必须拿到同一个实例（共用缓存与限速），用户关掉翻译时必须是 nil。
 // gear / beasts 是两个图鉴数据层入口（本机器人只有一份缓存，所有命令共用）。
 func pluginHandlers(b bot.Sender, svc *hd2.Service, renderer render.Renderer, loc *time.Location,
-	inlinePrefix string, trans translate.Translator,
+	trans translate.Translator,
 	gear codex.ArsenalService, beasts codex.BestiaryService) []bot.Handler {
-	handlers := system.Handlers(b, renderer, registeredInlinePrefixes(inlinePrefix))
+	handlers := system.Handlers(b, renderer)
 	handlers = append(handlers, war.Handlers(b, svc, renderer, loc)...)
-	handlers = append(handlers, planets.Handlers(b, svc, renderer, loc, inlinePrefix, trans)...)
+	handlers = append(handlers, planets.Handlers(b, svc, renderer, loc, planets.InlinePrefix, trans)...)
 	handlers = append(handlers, orders.Handlers(b, svc, renderer, loc, trans)...)
 	handlers = append(handlers, station.Handlers(b, svc, renderer, loc)...)
 	handlers = append(handlers, codex.Handlers(b, gear, beasts, renderer, loc)...)
 	return handlers
-}
-
-// registeredInlinePrefixes 返回本机器人实际注册的行内查询前缀，顺序即 /help 里的展示顺序：
-// 第一个是星球前缀（取自配置的 inline.prefix，留空表示不启用，此时帮助里也不列它），
-// 其余来自 codex 的图鉴清单。
-//
-// 注册与帮助说明共用这一份，不会出现「帮助里写了前缀、群里却搜不出来」；
-// 加了新前缀（改 codex.InlineSpecs）帮助会自动跟上。
-func registeredInlinePrefixes(inlinePrefix string) []string {
-	prefixes := make([]string, 0, len(codex.InlineSpecs)+1)
-	if trimmed := strings.TrimSpace(inlinePrefix); trimmed != "" {
-		prefixes = append(prefixes, trimmed)
-	}
-	for _, spec := range codex.InlineSpecs {
-		prefixes = append(prefixes, spec.Prefix)
-	}
-	return prefixes
 }
 
 // registerer 是「把命令与行内查询注册到机器人上」需要的最小能力：*bot.Bot 实现它，
@@ -251,10 +239,10 @@ type registerer interface {
 // 群里点按钮搜不出任何东西，而工厂函数各自单测都还是绿的。
 // trans 的语义与 pluginHandlers 一致：各插件共享同一个翻译层实例。
 func registerPlugins(tg registerer, svc *hd2.Service, renderer render.Renderer, loc *time.Location,
-	inlinePrefix string, trans translate.Translator,
+	trans translate.Translator,
 	gear codex.ArsenalService, beasts codex.BestiaryService) {
-	tg.Register(pluginHandlers(tg, svc, renderer, loc, inlinePrefix, trans, gear, beasts))
-	tg.RegisterInline(inlinePrefix, planets.InlineHandler(svc, tg, inlinePrefix))
+	tg.Register(pluginHandlers(tg, svc, renderer, loc, trans, gear, beasts))
+	tg.RegisterInline(planets.InlinePrefix, planets.InlineHandler(svc, tg, planets.InlinePrefix))
 	for _, registration := range codex.InlineHandlers(gear, beasts, tg) {
 		tg.RegisterInline(registration.Prefix, registration.Handler)
 	}

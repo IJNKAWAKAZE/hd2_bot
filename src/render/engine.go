@@ -303,10 +303,18 @@ type pageDriver interface {
 // 真浏览器又慢又依赖本机环境，不适合放进单测，而引擎的自愈与串行逻辑又必须被测到。
 var newDriver = newPlaywrightDriver
 
+// PrepareRuntime 在启动阶段检查并补齐匹配版本的驱动和 Chromium。
+// 已安装的组件由 Playwright 复用；下载不占用单条指令的渲染超时。
+func PrepareRuntime() error {
+	if err := playwright.Install(&playwright.RunOptions{Browsers: []string{"chromium"}}); err != nil {
+		return fmt.Errorf("准备 Playwright 驱动和 Chromium 失败：%w", err)
+	}
+	return nil
+}
+
 // newPlaywrightDriver 启动 playwright 驱动与一个 headless Chromium，并建好复用的浏览器上下文。
 //
-// 这里刻意不调用 playwright.Install()：驱动与浏览器由部署环境准备好。
-// 让渲染路径触发联网下载，会把「配置写错」和「网络慢」两件事混在一起，排查起来很难受。
+// 驱动与浏览器由启动阶段的 PrepareRuntime 准备；渲染过程中不联网安装。
 func newPlaywrightDriver(cfg DriverConfig) (pageDriver, error) {
 	pw, err := playwright.Run()
 	if err != nil {

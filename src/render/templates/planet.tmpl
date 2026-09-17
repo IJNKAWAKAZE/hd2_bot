@@ -8,19 +8,21 @@
        群系实景图没有素材逻辑名时用暗底斜纹占位（.pc-nobiome），卡片其余部分照常——
        配错一张图比没有图更糟。 */ -}}
 {{define "body"}}
-<article class="planet-card {{.CardClass}}">
+<article class="planet-card planet-detail-card {{.CardClass}}">
   <div class="pc-top">
     {{if .Emblem}}{{icon .Emblem "pc-ficon"}}{{end}}
     <span class="pc-fname">{{.Faction}}</span>
     <div class="pc-res">{{icon "ui.reinforce" "pc-reinf"}}<span class="num">{{.PlayerCount}}</span> 士兵</div>
   </div>
 
+  <div class="planet-overview">
   {{if .BiomeAsset}}
   <div class="pc-landmark"><img src="{{asset .BiomeAsset}}" alt=""></div>
   {{else}}
   <div class="pc-landmark pc-nobiome"></div>
   {{end}}
 
+  <div class="planet-situation">
   <div class="pc-head">
     <span class="pc-type">{{.Status}}</span>
     <span class="pc-name{{if .Defense}} def{{end}}">{{.NameChinese}}</span>
@@ -44,6 +46,8 @@
   </div>
   {{end}}
 
+  </div></div>
+  <div class="planet-detail">
   <div class="pd-section">
     <div class="pd-title">星球情报<span class="pd-cn">PLANET INTEL</span></div>
     <div class="pd-row"><span>生物群系</span><strong class="pd-v">{{.Biome}}</strong></div>
@@ -74,5 +78,6 @@
     <div class="pd-row"><span>防守血量</span><strong class="pd-v">{{.Event.HealthText}}</strong></div>
   </div>
   {{end}}
+  </div>
 </article>
 {{end}}

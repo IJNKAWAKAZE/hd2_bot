@@ -153,7 +153,7 @@ func textOf(t *testing.T, article tgbotapi.InlineQueryResultArticle) string {
 // ---- 前缀清单 ----
 
 // TestInlineSpecsCoverEveryCodexKind 校验六个前缀各自负责什么：武器前缀一次查三类，
-// 其余装备前缀各查一类，军需簿前缀查名单，敌人前缀标记成查图鉴而不是装备目录。
+// 其余装备前缀各查一类，债券前缀查名单，敌人前缀标记成查图鉴而不是装备目录。
 // 还要求每个前缀都能被自己的指令反查回来——六条指令不带参数时就是靠它找按钮的前缀。
 func TestInlineSpecsCoverEveryCodexKind(t *testing.T) {
 	byPrefix := make(map[string]InlineSpec, len(InlineSpecs))
@@ -179,7 +179,7 @@ func TestInlineSpecsCoverEveryCodexKind(t *testing.T) {
 	if _, ok := inlineSpecForCommand("不存在的指令"); ok {
 		t.Error("没登记的指令不该反查到前缀")
 	}
-	want := []string{"武器-", "战备-", "护甲-", "手雷-", "军需簿-", "敌人-"}
+	want := []string{"武器-", "战备-", "护甲-", "手雷-", "债券-", "敌人-"}
 	if got := len(byPrefix); got != len(want) {
 		t.Fatalf("应有 %d 个前缀，实际 %d 个", len(want), got)
 	}
@@ -199,9 +199,9 @@ func TestInlineSpecsCoverEveryCodexKind(t *testing.T) {
 			t.Errorf("%s 应只查 %s，实际 %v（enemy=%v warbond=%v）", prefix, kind, spec.Kinds, spec.Enemy, spec.Warbond)
 		}
 	}
-	// 军需簿前缀既不是装备类别也不是图鉴：它查的是 24 本名单。
-	if spec := byPrefix["军需簿-"]; !spec.Warbond || spec.Enemy || len(spec.Kinds) != 0 || spec.Command != "warbonds" {
-		t.Errorf("军需簿前缀应查名单并对应 /warbonds，实际 %+v", spec)
+	// 债券前缀既不是装备类别也不是图鉴：它查的是 24 本名单。
+	if spec := byPrefix["债券-"]; !spec.Warbond || spec.Enemy || len(spec.Kinds) != 0 || spec.Command != "warbonds" {
+		t.Errorf("债券前缀应查名单并对应 /warbonds，实际 %+v", spec)
 	}
 	if spec := byPrefix["敌人-"]; !spec.Enemy || spec.Warbond {
 		t.Errorf("敌人前缀应标记成查图鉴，实际 %+v", spec)
@@ -321,7 +321,7 @@ func TestGearInlineResults(t *testing.T) {
 	if article.Title != "野狼（AR-2）" {
 		t.Errorf("标题应是中文名加型号，实际 %q", article.Title)
 	}
-	wantDesc := "AR-2 Coyote ｜ 主武器 ｜ 军需簿「沙漠魔影」 · 第 1 页 · 35 勋章"
+	wantDesc := "AR-2 Coyote ｜ 主武器 ｜ 债券「沙漠魔影」 · 第 1 页 · 35 勋章"
 	if article.Description != wantDesc {
 		t.Errorf("描述应为 %q，实际 %q", wantDesc, article.Description)
 	}
@@ -389,9 +389,9 @@ func TestInlineDescriptionSkipsRepeatedEnglishName(t *testing.T) {
 	}
 }
 
-// ---- 军需簿候选 ----
+// ---- 债券候选 ----
 
-// TestSearchInlineWarbonds 校验军需簿的筛选：空关键字给整份名单，关键字命中中文名、英文名或上游 id
+// TestSearchInlineWarbonds 校验债券的筛选：空关键字给整份名单，关键字命中中文名、英文名或上游 id
 // 都算数（大小写不敏感），没命中就是空名单。
 func TestSearchInlineWarbonds(t *testing.T) {
 	catalog := mustCatalog(t)
@@ -443,7 +443,7 @@ func TestSearchInlineWarbondsCapsAtLimit(t *testing.T) {
 	}
 }
 
-// TestWarbondInlineResults 校验军需簿候选：标题用中文名、描述写英文名/件数/价格，选中回填 /warbonds。
+// TestWarbondInlineResults 校验债券候选：标题用中文名、描述写英文名/件数/价格，选中回填 /warbonds。
 func TestWarbondInlineResults(t *testing.T) {
 	catalog := mustCatalog(t)
 	results := warbondInlineResults(catalog, "沙漠")
@@ -452,7 +452,7 @@ func TestWarbondInlineResults(t *testing.T) {
 	}
 	article := articleOf(t, results[0])
 	if article.ID != inlineResultIDPrefix+"warbond-dust-devils" {
-		t.Errorf("候选 ID 应带前缀与军需簿 id，实际 %q", article.ID)
+		t.Errorf("候选 ID 应带前缀与债券 id，实际 %q", article.ID)
 	}
 	if article.Title != "沙漠魔影" {
 		t.Errorf("标题应用中文名，实际 %q", article.Title)
@@ -461,7 +461,7 @@ func TestWarbondInlineResults(t *testing.T) {
 		t.Errorf("描述错误：%q", article.Description)
 	}
 	if got := textOf(t, article); got != "/warbonds 沙漠魔影" {
-		t.Errorf("军需簿候选应回填 /warbonds，实际 %q", got)
+		t.Errorf("债券候选应回填 /warbonds，实际 %q", got)
 	}
 	// 首发那本不单卖（superCredits 为 null）：描述里要写「不单卖」，而不是留个 0。
 	free := articleOf(t, warbondInlineResults(catalog, "总动员")[0])
@@ -560,13 +560,13 @@ func TestAnswerInlineEnemyPrefix(t *testing.T) {
 	}
 }
 
-// TestAnswerInlineWarbondPrefix 校验军需簿前缀走名单而不是装备目录。
+// TestAnswerInlineWarbondPrefix 校验债券前缀走名单而不是装备目录。
 func TestAnswerInlineWarbondPrefix(t *testing.T) {
 	answerer := &recordingAnswerer{}
-	spec := InlineSpec{Prefix: "军需簿-", Label: "军需簿", Command: "warbonds", Warbond: true}
+	spec := InlineSpec{Prefix: "债券-", Label: "债券", Command: "warbonds", Warbond: true}
 	handler := InlineHandler(&fakeGear{catalog: mustCatalog(t)}, nil, answerer, spec)
 
-	if err := handler(tgbotapi.InlineQuery{ID: "q-3", Query: "军需簿-"}); err != nil {
+	if err := handler(tgbotapi.InlineQuery{ID: "q-3", Query: "债券-"}); err != nil {
 		t.Fatalf("应答失败：%v", err)
 	}
 	if len(answerer.results[0]) != 2 {
@@ -577,7 +577,7 @@ func TestAnswerInlineWarbondPrefix(t *testing.T) {
 		t.Errorf("标题应用中文名，实际 %q", article.Title)
 	}
 	if got := textOf(t, article); got != "/warbonds 绝地潜兵总动员！" {
-		t.Errorf("军需簿候选应回填 /warbonds，实际 %q", got)
+		t.Errorf("债券候选应回填 /warbonds，实际 %q", got)
 	}
 }
 
@@ -589,7 +589,7 @@ func TestAnswerInlineWithoutDataSource(t *testing.T) {
 	}{
 		{"装备前缀没有装备数据层", InlineSpec{Prefix: "武器-", Label: "武器", Kinds: []arsenal.Kind{arsenal.KindPrimary}}},
 		{"敌人前缀没有图鉴数据层", InlineSpec{Prefix: "敌人-", Label: "敌人", Enemy: true}},
-		{"军需簿前缀没有装备数据层", InlineSpec{Prefix: "军需簿-", Label: "军需簿", Command: "warbonds", Warbond: true}},
+		{"债券前缀没有装备数据层", InlineSpec{Prefix: "债券-", Label: "债券", Command: "warbonds", Warbond: true}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

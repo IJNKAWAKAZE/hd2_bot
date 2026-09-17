@@ -83,7 +83,7 @@
     {{end}}
   </div>
 
-  <aside class="wiki__side">
+    <aside class="wiki__side">
     <section class="panel panel--side">
       <h2 class="panel__head">总览</h2>
       <div class="panel__body">
@@ -103,12 +103,6 @@
       <div class="panel__body">
         <div class="navlist">{{range .Related}}<div class="navlist__row"><span>{{.Name}}</span><em>{{.Category}}</em></div>{{end}}</div>
       </div>
-    </section>
-    {{end}}
-    {{if .Source}}
-    <section class="panel panel--side">
-      <h2 class="panel__head">来源</h2>
-      <div class="panel__body"><div class="source">{{.Source}}</div></div>
     </section>
     {{end}}
   </aside>

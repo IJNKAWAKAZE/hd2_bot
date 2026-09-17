@@ -550,7 +550,7 @@ func TestPlanetCardHTML(t *testing.T) {
 	}
 	wants := []string{
 		// 卡面头：阵营色卡框（敌方控制 → 机器人红）＋ 顶栏 ＋ 群系图 ＋ 战役状态与星球名
-		`class="planet-card f-auto"`, "pc-top", "pc-ficon", "pc-fname", "机器人", "19,507",
+		`class="planet-card planet-detail-card f-auto"`, "pc-top", "pc-ficon", "pc-fname", "机器人", "19,507",
 		"pc-landmark", "解放战役", `class="pc-name">贝克温III</span>`, "Bekvam III",
 		// 进度条与情报小节
 		"解放", "80.8%", "width: 80.8%", `class="pd-title"`, "星球情报", "阿基拉分区",

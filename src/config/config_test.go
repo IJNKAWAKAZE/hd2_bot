@@ -229,15 +229,12 @@ api:
 bot:
   token: 123:abc
   group_id: -1001234567890
-  photo_del_delay: {photo_delay}
 render:
   enabled: {enabled}
   width: {width}
   scale: {scale}
   timeout: {timeout}
   format: {format}
-inline:
-  prefix: {prefix}
 `
 
 // renderCaseYAML 按 占位符/值 交替给出的替换对生成一份完整配置；
@@ -265,8 +262,6 @@ var renderAndInlineDefaults = []string{
 	"{scale}", "2",
 	"{timeout}", "15",
 	"{format}", "png",
-	"{prefix}", `"星球-"`,
-	"{photo_delay}", "0",
 }
 
 // overrideDefaults 把用例给出的覆盖项叠加到默认占位符表之上，后出现的值覆盖先出现的值。
@@ -295,12 +290,6 @@ func TestRenderAndInlineDefaults(t *testing.T) {
 	if cfg.Render.Format != "png" {
 		t.Errorf("render.format 默认值错误，期望 png，实际 %q", cfg.Render.Format)
 	}
-	if cfg.Bot.PhotoDelDelay != 0 {
-		t.Errorf("bot.photo_del_delay 默认值错误，期望 0，实际 %v", cfg.Bot.PhotoDelDelay)
-	}
-	if cfg.Inline.Prefix != "星球-" {
-		t.Errorf("inline.prefix 默认值错误，期望 星球-，实际 %q", cfg.Inline.Prefix)
-	}
 }
 
 // TestValidateRejectsInvalidRenderFields 表驱动校验非法值都会报出对应字段名。
@@ -314,14 +303,10 @@ func TestValidateRejectsInvalidRenderFields(t *testing.T) {
 		{"scale 为 0", []string{"{scale}", "0"}, "render.scale"},
 		{"timeout 为 0", []string{"{timeout}", "0"}, "render.timeout"},
 		{"format 非法", []string{"{format}", "xml"}, "render.format"},
-		{"photo_del_delay 为负", []string{"{photo_delay}", "-1"}, "bot.photo_del_delay"},
-		{"prefix 含空格", []string{"{prefix}", `" "`}, "inline.prefix"},
 		{"width 为负", []string{"{width}", "-100"}, "render.width"},
 		{"scale 为负", []string{"{scale}", "-1"}, "render.scale"},
 		{"timeout 为负", []string{"{timeout}", "-5"}, "render.timeout"},
 		{"format 为空串", []string{"{format}", `""`}, "render.format"},
-		{"prefix 含制表符", []string{"{prefix}", `"\t"`}, "inline.prefix"},
-		{"prefix 含全角空格", []string{"{prefix}", `"\u3000"`}, "inline.prefix"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -342,14 +327,12 @@ func TestValidateJoinsRenderErrors(t *testing.T) {
 		"{width}", "0",
 		"{timeout}", "0",
 		"{format}", "bmp",
-		"{photo_delay}", "-3",
-		"{prefix}", `"a b"`,
 	)...)))
 	if err == nil {
 		t.Fatal("多个渲染配置非法时应当报错，实际通过")
 	}
 	msg := err.Error()
-	for _, field := range []string{"render.width", "render.timeout", "render.format", "bot.photo_del_delay", "inline.prefix"} {
+	for _, field := range []string{"render.width", "render.timeout", "render.format"} {
 		if !strings.Contains(msg, field) {
 			t.Errorf("聚合错误信息应包含 %s，实际：%s", field, msg)
 		}

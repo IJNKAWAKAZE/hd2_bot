@@ -210,8 +210,8 @@ func TestCommandsWithoutKeywordSendInlineButton(t *testing.T) {
 			if len(r.Cards) != 0 || len(s.Photos) != 0 {
 				t.Fatalf("不带关键字时不该出图，实际 %d 张卡片 / %d 张图", len(r.Cards), len(s.Photos))
 			}
-			if len(s.Calls) != 1 || s.Calls[0] != "hint" {
-				t.Fatalf("应只发一条带按钮的文本，实际调用 %v", s.Calls)
+			if len(s.Calls) != 2 || s.Calls[0] != "hint" || s.Calls[1] != "delete" {
+				t.Fatalf("应发送按钮后删除查询指令，实际调用 %v", s.Calls)
 			}
 			if !strings.Contains(s.Replies[0], spec.Label) {
 				t.Errorf("提示文案应写明能搜什么，实际 %q", s.Replies[0])
@@ -333,8 +333,8 @@ func TestEquipmentCatalogFailureRepliesError(t *testing.T) {
 	}
 }
 
-// TestWarbondsSendsCardAndDetail 校验军需簿：带关键字命中时出那一本的明细；
-// 不带关键字只发一条带按钮的提示（按钮带的是「军需簿-」前缀，名单在行内候选里看）。
+// TestWarbondsSendsCardAndDetail 校验债券：带关键字命中时出那一本的明细；
+// 不带关键字只发一条带按钮的提示（按钮带的是「债券-」前缀，名单在行内候选里看）。
 func TestWarbondsSendsCardAndDetail(t *testing.T) {
 	catalog := mustCatalog(t)
 	s := &plugtest.Sender{GroupID: -100}
@@ -363,7 +363,7 @@ func TestWarbondsSendsCardAndDetail(t *testing.T) {
 	}
 }
 
-// TestWarbondsFallsBackToText 校验军需簿渲染失败时回退文本。
+// TestWarbondsFallsBackToText 校验债券渲染失败时回退文本。
 func TestWarbondsFallsBackToText(t *testing.T) {
 	logs := plugtest.CaptureLog(t)
 	s := &plugtest.Sender{GroupID: -100}
@@ -372,8 +372,8 @@ func TestWarbondsFallsBackToText(t *testing.T) {
 	if err := plugtest.RunHandler(t, handlers, "warbonds", plugtest.MessageUpdate(-100, "/warbonds 尘卷风")); err != nil {
 		t.Fatalf("执行 /warbonds 失败：%v", err)
 	}
-	if len(s.Replies) != 1 || !strings.Contains(s.Replies[0], "*军需簿*") {
-		t.Fatalf("应回一条军需簿文本，实际 %v", s.Replies)
+	if len(s.Replies) != 1 || !strings.Contains(s.Replies[0], "*债券*") {
+		t.Fatalf("应回一条债券文本，实际 %v", s.Replies)
 	}
 	plugtest.AssertLogFields(t, logs, "/warbonds 渲染失败", -100)
 }

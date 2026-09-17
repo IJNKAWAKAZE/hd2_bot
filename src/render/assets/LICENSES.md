@@ -72,7 +72,7 @@
 
 | 上游文件 | 用途 | 本地形态 |
 | --- | --- | --- |
-| `src/data/catalog.json` | 装备 / 军需簿目录（298 件） | 运行时下载 → `data/arsenal/catalog.json` |
+| `src/data/catalog.json` | 装备 / 债券目录（298 件） | 运行时下载 → `data/arsenal/catalog.json` |
 | `src/data/community-aliases.json` | 玩家外号表（38 条） | 运行时下载 → `data/arsenal/community-aliases.json` |
 | `public/assets/wiki/<id>.png\|svg` | 装备图（240 PNG + 58 SVG） | 按需下载 → `data/arsenal/images/` |
 

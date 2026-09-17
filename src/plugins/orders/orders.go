@@ -117,9 +117,11 @@ func (h *handler) assignments(update tgbotapi.Update) error {
 
 	// 空列表不是错误（实测上游就是返回 []）：照常出一张「暂无重要指令」的占位卡。
 	fetchedAt := res.FetchedAt.In(h.display)
-	card := BuildAssignmentsCard(res.Value, fetchedAt, res.Stale)
+	card := BuildTranslatedAssignments(ctx, res.Value, fetchedAt, res.Stale, h.trans)
 
-	img, rerr := h.render(ctx, render.Card{Name: assignmentsCardName, Data: card})
+	renderCtx, renderCancel := context.WithTimeout(context.Background(), plugutil.Timeout)
+	defer renderCancel()
+	img, rerr := h.render(renderCtx, render.Card{Name: assignmentsCardName, Data: card})
 	if rerr != nil {
 		log.Printf("/assignments 渲染失败 chat=%d err=%v", chatID, rerr)
 		return h.sender.Reply(chatID, FormatAssignmentsText(card), msg.MessageID)
@@ -159,8 +161,11 @@ func (h *handler) dispatches(update tgbotapi.Update) error {
 	//
 	// 分页（S4.1）：整卡超过高度安全线时先拆成 2~3 页图，而不是直接退文本。
 	// 每页只装一部分条目，分页后每页的「每条最多多少字」预算反而更宽松、截断更少。
+	// 只翻译一次，分页重试和文本降级复用同一份结果，避免过期上下文二次翻译丢失译文。
+	fullCard := BuildTranslatedDispatches(ctx, shown, len(shown), fetchedAt, res.Stale, h.trans)
 	pageOf := func(from, to, page, pages int) DispatchesCard {
-		card := BuildTranslatedDispatches(ctx, shown[from:to], to-from, fetchedAt, res.Stale, h.trans)
+		card := fullCard
+		card.Items = fullCard.Items[from:to]
 		card.Note = render.WithPageNote(card.Note, page, pages)
 		return card
 	}
@@ -171,7 +176,9 @@ func (h *handler) dispatches(update tgbotapi.Update) error {
 	if h.renderer == nil {
 		return fallback()
 	}
-	imgs, rerr := render.Paginate(ctx, h.renderer, len(shown),
+	renderCtx, renderCancel := context.WithTimeout(context.Background(), plugutil.Timeout)
+	defer renderCancel()
+	imgs, rerr := render.Paginate(renderCtx, h.renderer, len(shown),
 		func(page, pages, from, to, total int) render.Card {
 			return render.Card{Name: dispatchesCardName, Data: pageOf(from, to, page, pages)}
 		})

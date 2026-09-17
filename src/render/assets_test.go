@@ -11,6 +11,17 @@ import (
 	"testing/fstest"
 )
 
+func TestFactionEmblemColors(t *testing.T) {
+	for name, color := range map[string]string{
+		"emblem.super_earth": "#5BA3D0", "emblem.automaton": "#E74C3C",
+		"emblem.terminids": "#F5C518", "emblem.illuminate": "#CF64F8",
+	} {
+		if !strings.Contains(string(iconFunc(name, "card__emblem")), "fill:"+color) {
+			t.Errorf("%s missing faction color %s", name, color)
+		}
+	}
+}
+
 // TestAssetFuncReturnsDataURI 校验模板里的 asset 函数输出 data URI 且命中缓存。
 // 素材既有位图也有矢量（emblem.automaton 是游戏原生 SVG），所以只断言「是 data URI」。
 func TestAssetFuncReturnsDataURI(t *testing.T) {

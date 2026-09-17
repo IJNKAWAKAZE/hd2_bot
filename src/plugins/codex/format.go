@@ -101,10 +101,10 @@ func detailText(b *strings.Builder, detail *EquipmentDetail) {
 	}
 }
 
-// FormatWarbondsText 把军需簿卡片排成文本：明细优先，没有明细时列名单。
+// FormatWarbondsText 把债券卡片排成文本：明细优先，没有明细时列名单。
 func FormatWarbondsText(card WarbondsCard) string {
 	var b strings.Builder
-	b.WriteString("*军需簿*\n")
+	b.WriteString("*债券*\n")
 	if card.Intro != "" {
 		fmt.Fprintf(&b, "%s\n", bot.Escape(card.Intro))
 	}
@@ -187,9 +187,6 @@ func FormatEnemyText(card EnemyCard) string {
 		}
 		if len(enemy.Related) > 0 {
 			fmt.Fprintf(&b, "同阵营：%s\n", bot.Escape(enemyLinkNames(enemy.Related)))
-		}
-		if enemy.Source != "" {
-			fmt.Fprintf(&b, "来源：%s\n", bot.Escape(enemy.Source))
 		}
 	}
 	for _, note := range card.Notes {

@@ -1,10 +1,10 @@
-{{- /* warbonds 是 /warbonds 的军需簿卡片：不带关键字时是全部名单，带了关键字且命中时是某一本的明细。
+{{- /* warbonds 是 /warbonds 的债券卡片：不带查询时是全部名单，带了查询且命中时是某一本的明细。
        两个分支互斥（Detail 为空才走名单），因此卡片上不会同时出现名单与明细。
        视图模型是 Go 侧的 WarbondsCard，价格栏的「—」表示这本不单卖。 */ -}}
 {{define "body"}}
-<section class="section">
+{{if .Intro}}<section class="section">
   <p class="text">{{.Intro}}</p>
-</section>
+</section>{{end}}
 
 {{if .Detail}}
 <section class="section">
@@ -41,7 +41,7 @@
 </section>
 {{else}}
 <section class="section">
-  <h2 class="section__title">全部军需簿</h2>
+  <h2 class="section__title">全部债券</h2>
   <ul class="list">
     {{range .Books}}
     <li class="list__item">

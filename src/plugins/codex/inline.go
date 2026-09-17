@@ -6,7 +6,7 @@
 //	战备-  其它战备
 //	护甲-  护甲
 //	手雷-  手雷
-//	军需簿-  24 本战争债券（名单，选中后回填 /warbonds <名称>）
+//	债券-  24 本战争债券（名单，选中后回填 /warbonds <名称>）
 //	敌人-  敌人图鉴
 //
 // 两条约定：
@@ -56,7 +56,7 @@ type InlineSpec struct {
 	Command string         // 对应的指令名（不带斜杠）：不带参数时就是靠它找前缀
 	Kinds   []arsenal.Kind // 装备类前缀要查的类别
 	Enemy   bool           // true 表示这是敌人前缀（查图鉴而不是装备目录）
-	Warbond bool           // true 表示这是军需簿前缀（查 24 本名单而不是装备）
+	Warbond bool           // true 表示这是债券前缀（查 24 本名单而不是装备）
 }
 
 // InlineSpecs 是本插件负责的全部行内前缀。main 按它逐个注册，
@@ -67,7 +67,7 @@ var InlineSpecs = []InlineSpec{
 	{Prefix: "战备-", Label: "战备", Command: "strat", Kinds: []arsenal.Kind{arsenal.KindStratagem}},
 	{Prefix: "护甲-", Label: "护甲", Command: "armor", Kinds: []arsenal.Kind{arsenal.KindArmor}},
 	{Prefix: "手雷-", Label: "手雷", Command: "grenade", Kinds: []arsenal.Kind{arsenal.KindGrenade}},
-	{Prefix: "军需簿-", Label: "军需簿", Command: "warbonds", Warbond: true},
+	{Prefix: "债券-", Label: "债券", Command: "warbonds", Warbond: true},
 	{Prefix: "敌人-", Label: "敌人", Command: "enemy", Enemy: true},
 }
 
@@ -150,7 +150,7 @@ func answerInline(gear inlineGear, beasts inlineBeasts, answerer InlineAnswerer,
 		hits := bestiary.Search(list, bestiary.Query{Keyword: keyword, Limit: inlineResultLimit})
 		results = enemyInlineResults(hits.Enemies)
 	} else if spec.Warbond {
-		// 军需簿前缀查的是 24 本名单而不是装备目录：不带关键字时把整份名单当候选。
+		// 债券前缀查的是 24 本名单而不是装备目录：不带关键字时把整份名单当候选。
 		if gear == nil {
 			log.Printf("行内查询 %s 没有装备数据源，回空结果 query=%s", spec.Prefix, query.ID)
 			return plugutil.AnswerInline(answerer, query.ID, nil)
@@ -267,7 +267,7 @@ func commandForKind(kind arsenal.Kind) string {
 	return "gun"
 }
 
-// searchInlineWarbonds 按关键字筛军需簿：中文名、英文名、上游 id 命中任意一个即可。
+// searchInlineWarbonds 按关键字筛债券：中文名、英文名、上游 id 命中任意一个即可。
 // 这里刻意不打分排序：一共 24 本，保持上游顺序反而更容易找。关键字为空时给整份名单（最多 inlineResultLimit 本）。
 func searchInlineWarbonds(catalog *arsenal.Catalog, keyword string) []arsenal.Warbond {
 	all := catalog.Warbonds()
@@ -285,7 +285,7 @@ func searchInlineWarbonds(catalog *arsenal.Catalog, keyword string) []arsenal.Wa
 	return books
 }
 
-// warbondMatches 判断一本军需簿是否命中关键字（大小写不敏感）。
+// warbondMatches 判断一本债券是否命中关键字（大小写不敏感）。
 func warbondMatches(book arsenal.Warbond, needle string) bool {
 	for _, field := range []string{book.NameZh, book.NameEn, book.ID} {
 		if strings.Contains(strings.ToLower(field), needle) {
@@ -295,7 +295,7 @@ func warbondMatches(book arsenal.Warbond, needle string) bool {
 	return false
 }
 
-// warbondInlineResults 把军需簿拼成文章式候选：标题用中文名，描述写英文名、装备件数与解锁价。
+// warbondInlineResults 把债券拼成文章式候选：标题用中文名，描述写英文名、装备件数与解锁价。
 // 选中后回填成 /warbonds <名称>，与装备候选回填 /gun <名称> 是同一个套路。
 func warbondInlineResults(catalog *arsenal.Catalog, keyword string) []interface{} {
 	books := searchInlineWarbonds(catalog, keyword)
@@ -314,7 +314,7 @@ func warbondInlineResults(catalog *arsenal.Catalog, keyword string) []interface{
 	return results
 }
 
-// warbondInlineDescription 拼军需簿候选的描述行：英文名 ｜ 件数 ｜ 解锁价（取不到的部分自动省略）。
+// warbondInlineDescription 拼债券候选的描述行：英文名 ｜ 件数 ｜ 解锁价（取不到的部分自动省略）。
 func warbondInlineDescription(book arsenal.Warbond) string {
 	parts := make([]string, 0, 3)
 	if english := strings.TrimSpace(book.NameEn); english != "" && !strings.EqualFold(english, strings.TrimSpace(book.NameZh)) {

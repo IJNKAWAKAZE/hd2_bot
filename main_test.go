@@ -410,48 +410,20 @@ func (f *fakeRegisterer) RegisterInline(prefix string, _ func(query tgbotapi.Inl
 // AnswerInline 满足 registerer 契约；装配用例不会触发行内应答。
 func (f *fakeRegisterer) AnswerInline(string, []interface{}) error { return nil }
 
-// helpPlainText 把帮助卡片的可见文案拼成一段纯文本（不含模板排版），
-// 供接线用例核对「帮助里到底写了什么」，不依赖 %+v 这类格式细节。
-func helpPlainText(card system.HelpCard) string {
-	var b strings.Builder
-	b.WriteString(card.Intro)
-	for _, note := range card.Notes {
-		b.WriteString("\n")
-		b.WriteString(note)
-	}
-	for _, c := range card.Commands {
-		b.WriteString("\n")
-		b.WriteString(c.Name + " " + c.Desc + " " + c.Example)
-	}
-	return b.String()
-}
-
 // TestRegisterPluginsRegistersCommandsAndInline 校验装配把命令与行内查询都交出去了，且前缀取自同一个参数：
 // 少了行内那半，群里点 /planets 的按钮后搜不出任何东西；前缀不一致则 Telegram 根本不会把查询交过来。
 func TestRegisterPluginsRegistersCommandsAndInline(t *testing.T) {
 	fake := &fakeRegisterer{}
-	registerPlugins(fake, nil, nil, time.UTC, "星球-", translate.Passthrough(), nil, nil)
+	registerPlugins(fake, nil, nil, time.UTC, translate.Passthrough(), nil, nil)
 
 	if len(fake.handlers) == 0 {
 		t.Fatal("装配应注册插件命令，实际一条都没注册")
 	}
 	// 七个前缀：星球来自 planets（前缀取自配置），其余六个来自 codex 的图鉴检索。
 	// 这份清单写死在这里（不以实现为准）：加前缀时测试先红，逼着人同时更新帮助与文档。
-	wantPrefix := []string{"星球-", "武器-", "战备-", "护甲-", "手雷-", "军需簿-", "敌人-"}
+	wantPrefix := []string{"星球-", "武器-", "战备-", "护甲-", "手雷-", "债券-", "敌人-"}
 	if !equalStrings(fake.inlinePrefix, wantPrefix) {
 		t.Fatalf("应注册七个行内前缀 %v，实际 %v", wantPrefix, fake.inlinePrefix)
-	}
-	// 帮助里必须写清每个已注册的前缀：注册了却没写进帮助（用户不知道能这么搜）
-	// 与写了帮助却没注册（打前缀搜不出东西）都要在这里被拦下。
-	help := helpPlainText(system.BuildHelpCard(registeredInlinePrefixes("星球-")))
-	for _, prefix := range fake.inlinePrefix {
-		if !strings.Contains(help, prefix) {
-			t.Errorf("帮助里没写行内前缀 %q：\n%s", prefix, help)
-		}
-	}
-	// 前缀留空（配置里关掉星球前缀）时，帮助与注册都不该凭空多出前缀。
-	if got := registeredInlinePrefixes("  "); !equalStrings(got, wantPrefix[1:]) {
-		t.Errorf("星球前缀留空时应只剩图鉴前缀，实际 %v", got)
 	}
 	// 行内结果的回填指令必须真的注册过，否则选中候选只会得到「未知指令」。
 	for _, name := range fake.handlers {
@@ -467,7 +439,7 @@ func TestRegisterPluginsRegistersCommandsAndInline(t *testing.T) {
 // （群里打了命令没反应）都会在这里被拦下。
 func TestPluginHandlersCoverAllHelpCommands(t *testing.T) {
 	registered := map[string]bool{}
-	for _, h := range pluginHandlers(nil, nil, nil, nil, "", nil, nil, nil) {
+	for _, h := range pluginHandlers(nil, nil, nil, nil, nil, nil, nil) {
 		registered[h.Name] = true
 	}
 	for _, name := range system.CommandNames() {
@@ -685,7 +657,7 @@ func TestPluginHandlersWithNoUsableBackendKeepsCardsClean(t *testing.T) {
 	}
 
 	s := &wiringSender{Sender: &plugtest.Sender{GroupID: -100}}
-	handlers := pluginHandlers(s, svc, nil, time.UTC, "", pluginTranslator(cfg, trans), nil, nil)
+	handlers := pluginHandlers(s, svc, nil, time.UTC, pluginTranslator(cfg, trans), nil, nil)
 	if err := plugtest.RunHandler(t, handlers, "dispatches", plugtest.MessageUpdate(-100, "/dispatches")); err != nil {
 		t.Fatalf("执行 /dispatches 失败：%v", err)
 	}
@@ -1179,7 +1151,7 @@ func TestPluginHandlersShareOneTranslator(t *testing.T) {
 	}}
 	s := &wiringSender{Sender: &plugtest.Sender{GroupID: -100}}
 
-	handlers := pluginHandlers(s, svc, nil, time.UTC, "星球-", trans, nil, nil)
+	handlers := pluginHandlers(s, svc, nil, time.UTC, trans, nil, nil)
 	if len(handlers) != len(system.CommandNames()) {
 		t.Fatalf("装配的指令数应与帮助清单一致：%d != %d", len(handlers), len(system.CommandNames()))
 	}
@@ -1211,7 +1183,7 @@ func TestPluginHandlersWithPassthroughLooksLikeFailure(t *testing.T) {
 
 	run := func(trans translate.Translator) string {
 		s := &wiringSender{Sender: &plugtest.Sender{GroupID: -100}}
-		handlers := pluginHandlers(s, svc, nil, time.UTC, "", trans, nil, nil)
+		handlers := pluginHandlers(s, svc, nil, time.UTC, trans, nil, nil)
 		if err := plugtest.RunHandler(t, handlers, "dispatches", plugtest.MessageUpdate(-100, "/dispatches")); err != nil {
 			t.Fatalf("执行 /dispatches 失败：%v", err)
 		}

@@ -21,7 +21,7 @@
     {{/* 名称块：装备图占满一行（参照站详情页也是整块大图），名字与获取/解锁/说明排在图下面。 */}}
     <section class="panel">
       <div class="panel__body">
-        {{if .Image}}<div class="hero__img"><img src="{{dataimg .Image}}" alt=""></div>{{end}}
+        {{if .Image}}<div class="hero__img{{if .CompactImage}} hero__img--compact{{end}}"><img src="{{dataimg .Image}}" alt=""></div>{{end}}
         <div class="item__head">
           <div class="item__text">
             <div class="item__name">{{.Name}}{{if .Model}} <span class="model mono">{{.Model}}</span>{{end}}</div>

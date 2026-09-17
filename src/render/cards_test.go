@@ -101,9 +101,9 @@ func TestPlanetCardHTMLRendersBiomeLandmark(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`class="planet-card f-hum"`, // 我方控制 → 超级地球蓝的卡框
-		`class="pc-landmark"`,       // 群系实景图块
-		"data:image/png;base64,",    // 群系图内联成 data URI（不依赖任何外部请求）
+		`class="planet-card planet-detail-card f-hum"`, // 我方控制 → 超级地球蓝的卡框
+		`class="pc-landmark"`,                          // 群系实景图块
+		"data:image/png;base64,",                       // 群系图内联成 data URI（不依赖任何外部请求）
 		`<span class="pc-name">富源</span>`,
 		"Luxuriant",
 	} {

@@ -66,7 +66,7 @@ type DispatchesCard struct {
 	Items         []DispatchItem // 已按发布时间倒序并截断
 }
 
-// AssignmentItem 是一条重要指令。上游当前没有进行中的指令（实测 /assignments 返回 []），
+// AssignmentItem 是一条重要指令。（实测 /assignments 返回 []），
 // 所以字段设计以「上游真给了数据也能看」为准，不为了占位卡做额外假设。
 type AssignmentItem struct {
 	Title      string // 标题；上游没给时「未命名指令」
@@ -255,6 +255,32 @@ func countTruncated(items []DispatchItem) int {
 // BuildAssignmentsCard 把重要指令转成卡片视图模型。
 // list 为空时返回 Empty 卡片（渲染「暂无重要指令」占位卡），而不是报错：
 // 上游实测当前就是返回 []，这是正常状态。
+func BuildTranslatedAssignments(ctx context.Context, list []hd2.Assignment, fetchedAt time.Time, stale bool, trans translate.Translator) AssignmentsCard {
+	card := BuildAssignmentsCard(list, fetchedAt, stale)
+	if trans == nil || card.Empty {
+		return card
+	}
+	var texts []string
+	for _, item := range card.Items {
+		texts = append(texts, item.Title, item.Briefing)
+	}
+	translated, err := trans.Translate(ctx, texts)
+	if err != nil {
+		log.Printf("/assignments 翻译失败，未翻译内容保留原文 err=%v", err)
+	}
+	if len(translated) != len(texts) {
+		return card
+	}
+	for i := range card.Items {
+		for j, field := range []*string{&card.Items[i].Title, &card.Items[i].Briefing} {
+			if translate.Moved(*field, translated[2*i+j]) {
+				*field, _ = truncateRunes(translate.CleanGameText(translated[2*i+j]), maxAssignmentRunes)
+			}
+		}
+	}
+	return card
+}
+
 func BuildAssignmentsCard(list []hd2.Assignment, fetchedAt time.Time, stale bool) AssignmentsCard {
 	ordered := make([]hd2.Assignment, len(list))
 	copy(ordered, list)

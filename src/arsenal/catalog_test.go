@@ -306,7 +306,7 @@ func TestKindAndAcqLabelsFallBack(t *testing.T) {
 		t.Errorf("未知类别应原样返回，实际 %q", got)
 	}
 	for kind, want := range map[string]string{
-		"warbond": "军需簿", "requisition": "征用点", "superstore": "超级商店",
+		"warbond": "债券", "requisition": "征用点", "superstore": "超级商店",
 		"event": "活动奖励", "default": "默认解锁", "unavailable": "已下架",
 	} {
 		if got := AcqLabel(kind); got != want {
@@ -382,10 +382,10 @@ func TestParseCatalogToleratesNonIntegerNumbers(t *testing.T) {
 
 	book, ok := catalog.Warbond("w")
 	if !ok {
-		t.Fatal("应能取到脏数据军需簿")
+		t.Fatal("应能取到脏数据债券")
 	}
 	if book.SuperCredits != 1001 || book.MedalsTotal != 60 {
-		t.Errorf("军需簿数值换算错误：%+v", book)
+		t.Errorf("债券数值换算错误：%+v", book)
 	}
 
 	// 实在解析不出来的数值留 0（卡片上不显示那一项），不影响其它字段。

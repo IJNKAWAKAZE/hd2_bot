@@ -30,6 +30,9 @@ import (
 // 数据来源不同、说法也不同），限流判定与限流文案则共用 plugutil.ErrorReply。
 const failureReply = "暂时获取不到星球数据，请稍后再试。"
 
+// InlinePrefix 是固定的星球行内搜索前缀；所有行内前缀统一由代码登记，不放进配置文件。
+const InlinePrefix = "星球-"
+
 // 行内搜索提示：点按钮后 Telegram 会用配置里的前缀预填行内查询，用户在输入框里继续打关键字。
 // 这两条文案是常量、不经过 bot.Escape，所以不能含 MarkdownV2 特殊字符（见 planets_test.go 的用例）。
 const (
@@ -49,6 +52,8 @@ type Sender interface {
 	SendPhoto(chatID int64, png []byte, replyTo int64) error
 	// SendTextWithKeyboard 发送带内联键盘的文本。
 	SendTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error
+	SendTemporaryTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, delay time.Duration) error
+	DeleteMessage(chatID, messageID int64) error
 	// IsTargetChat 判断会话是否是配置里指定的群。
 	IsTargetChat(chatID int64) bool
 }
@@ -147,7 +152,13 @@ func (h *handler) planet(update tgbotapi.Update) error {
 	if arg == "" {
 		// 不带参数时不再回一句用法，而是给一个行内搜索按钮（与明日方舟机器人的 /operator 一个套路）：
 		// 点一下就在输入框里带出「星球-」，用户在候选里挑，不必自己拼星球名。
-		return h.sendInlineHint(chatID, "planet")
+		if err := h.sendInlineHint(chatID, "planet"); err != nil {
+			return err
+		}
+		if err := h.sender.DeleteMessage(chatID, msg.MessageID); err != nil {
+			log.Printf("/planet 删除指令失败 chat=%d msg=%d err=%v", chatID, msg.MessageID, err)
+		}
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), plugutil.Timeout)
@@ -174,7 +185,10 @@ func (h *handler) planet(update tgbotapi.Update) error {
 	// 卡片与文本回退共用这一份视图模型：渲染失败时回退的文本与图片口径一致。
 	fetchedAt := res.FetchedAt.In(h.display)
 	card := BuildLocalizedPlanetCard(ctx, planet, fetchedAt, res.Stale, h.trans)
-	png, rerr := h.render(ctx, render.Card{Name: "planet", Data: card})
+	// 翻译可能耗尽取数上下文；渲染使用独立、有上限的预算，仍保留已得到的译文。
+	renderCtx, renderCancel := context.WithTimeout(context.Background(), plugutil.Timeout)
+	defer renderCancel()
+	png, rerr := h.render(renderCtx, render.Card{Name: "planet", Data: card})
 	if rerr != nil {
 		log.Printf("/planet 渲染失败 chat=%d name=%s err=%v", chatID, planet.Name, rerr)
 		return h.sender.Reply(chatID, FormatPlanetText(card), msg.MessageID)
@@ -207,8 +221,8 @@ func (h *handler) sendInlineHint(chatID int64, command string) error {
 		log.Printf("行内查询前缀为空，跳过 /%s 的搜索按钮 chat=%d", command, chatID)
 		return nil
 	}
-	return h.sender.SendTextWithKeyboard(chatID, inlineHintText,
-		plugutil.InlineSearchMarkup(inlineHintButton, h.inlinePrefix))
+	return h.sender.SendTemporaryTextWithKeyboard(chatID, inlineHintText,
+		plugutil.InlineSearchMarkup(inlineHintButton, h.inlinePrefix), 0)
 }
 
 // ResolvePlanet 按参数定位一颗星球，解析顺序固定为：

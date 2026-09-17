@@ -2,10 +2,6 @@
        帮助是静态内容：没有数据时间，也没有过期角标（Meta.DataTime 为空时外壳会自动隐藏这一行）。 */ -}}
 {{define "body"}}
 <section class="section">
-  <p class="text">{{.Intro}}</p>
-</section>
-
-<section class="section">
   <h2 class="section__title">全部指令</h2>
   <ul class="list">
     {{range .Commands}}
@@ -20,9 +16,5 @@
   </ul>
 </section>
 
-{{if .Notes}}
-<section class="section">
-  {{range .Notes}}<div class="muted">{{.}}</div>{{end}}
-</section>
-{{end}}
+
 {{end}}

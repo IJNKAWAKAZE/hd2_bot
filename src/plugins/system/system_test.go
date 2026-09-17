@@ -24,22 +24,18 @@ var (
 	_ render.Renderer = (*render.Engine)(nil)
 )
 
-// testPrefixes 是本包用例交给帮助的行内前缀清单：内容与 main 实际注册的那批一致，
-// 具体前缀名是什么不影响本包的断言（本包只关心「传进去的前缀有没有出现在帮助里」）。
-var testPrefixes = []string{"星球-", "武器-", "战备-", "护甲-", "手雷-", "军需簿-", "敌人-"}
-
 // runHandler 取出指定名字的处理器并执行。
 // 假 Sender、假渲染器、日志捕获、更新构造与「按名字找处理器」都在 plugtest 里，
 // 这里只留本插件的接线（Handlers 的参数是各插件自己的）。
 func runHandler(t *testing.T, s *plugtest.Sender, r render.Renderer, name string, update tgbotapi.Update) error {
 	t.Helper()
-	return plugtest.RunHandler(t, Handlers(s, r, testPrefixes), name, update)
+	return plugtest.RunHandler(t, Handlers(s, r), name, update)
 }
 
 // TestHandlersRegistered 校验 /help 已注册，且注册的指令都在帮助清单里。
 func TestHandlersRegistered(t *testing.T) {
 	names := map[string]bool{}
-	for _, h := range Handlers(&plugtest.Sender{}, plugtest.FailRenderer(), testPrefixes) {
+	for _, h := range Handlers(&plugtest.Sender{}, plugtest.FailRenderer()) {
 		names[h.Name] = true
 	}
 	for _, want := range []string{"help"} {
@@ -136,7 +132,7 @@ func TestHelpRenderFailureIsLogged(t *testing.T) {
 
 // TestHelpTextListsAllCommandsAndIsEscaped 校验文本回退列全指令、示例，且每个连字符都已转义（MarkdownV2 合法）。
 func TestHelpTextListsAllCommandsAndIsEscaped(t *testing.T) {
-	text := helpText(testPrefixes)
+	text := helpText()
 	for _, c := range commands {
 		if !strings.Contains(text, "/"+c.Name) {
 			t.Errorf("帮助文本缺少 /%s：\n%s", c.Name, text)
@@ -159,11 +155,11 @@ func TestHelpTextListsAllCommandsAndIsEscaped(t *testing.T) {
 
 // TestHelpCardHTML 校验帮助卡排出了全部指令、说明与示例，且没有数据时间与过期角标（帮助是静态内容）。
 func TestHelpCardHTML(t *testing.T) {
-	html, err := render.HTML(render.Card{Name: helpCardName, Data: BuildHelpCard(testPrefixes)})
+	html, err := render.HTML(render.Card{Name: helpCardName, Data: BuildHelpCard()})
 	if err != nil {
 		t.Fatalf("渲染帮助卡片 HTML 失败：%v", err)
 	}
-	for _, want := range []string{"指令一览", "绝地潜兵 2 情报机器人", "全部指令", `class="card__emblem"`} {
+	for _, want := range []string{"指令一览", "全部指令", `class="card__emblem"`} {
 		if !strings.Contains(html, want) {
 			t.Errorf("帮助卡片 HTML 缺少 %q", want)
 		}
@@ -187,9 +183,8 @@ func TestHelpCardHTML(t *testing.T) {
 // TestHelpCardHTMLEscapesText 校验卡片上的说明与示例被转义，宿主/上游文本不会注入 HTML。
 func TestHelpCardHTMLEscapesText(t *testing.T) {
 	injection := `<script>alert(1)</script>`
-	card := BuildHelpCard(testPrefixes)
+	card := BuildHelpCard()
 	card.Commands = []HelpCommand{{Name: "war", Desc: injection, Example: "/war " + injection}}
-	card.Notes = []string{injection}
 	html, err := render.HTML(render.Card{Name: helpCardName, Data: card})
 	if err != nil {
 		t.Fatalf("渲染帮助卡片 HTML 失败：%v", err)
@@ -202,40 +197,9 @@ func TestHelpCardHTMLEscapesText(t *testing.T) {
 	}
 }
 
-// TestHelpMentionsInlinePrefixes 校验行内前缀说明两条路径都写、且都照着传入的清单写：
-// 只改一边（卡片有、文本没有）或漏写某个前缀都会被抓到。
-// 前缀清单与实际注册是否一致由 main_test.go 的接线用例核对。
-func TestHelpMentionsInlinePrefixes(t *testing.T) {
-	card := BuildHelpCard(testPrefixes)
-	joined := strings.Join(card.Notes, "\n")
-	for _, prefix := range testPrefixes {
-		if !strings.Contains(joined, prefix) {
-			t.Errorf("帮助卡片缺少前缀 %q：%v", prefix, card.Notes)
-		}
-		if !strings.Contains(helpText(testPrefixes), bot.Escape(prefix)) {
-			t.Errorf("帮助文本缺少前缀 %q：\n%s", prefix, helpText(testPrefixes))
-		}
-	}
-	// 前缀清单为空（例如没配行内查询）时不该出现「行内搜索前缀：」这种空清单。
-	if note := inlinePrefixNote(nil); note != "" {
-		t.Errorf("空清单不该生成说明，实际 %q", note)
-	}
-	if blank := inlinePrefixNote([]string{"", "  "}); blank != "" {
-		t.Errorf("只有空白项的清单不该生成说明，实际 %q", blank)
-	}
-	for _, note := range BuildHelpCard(nil).Notes {
-		if strings.Contains(note, "行内搜索前缀") {
-			t.Errorf("空清单时帮助不该出现前缀说明：%s", note)
-		}
-	}
-	if strings.Contains(helpText(nil), "行内搜索前缀") {
-		t.Error("空清单时帮助文本不该出现前缀说明")
-	}
-}
-
 // TestHelpCardListsAllCommands 校验卡片里的指令清单与 CommandNames 完全一致（同源，不会一边多一边少）。
 func TestHelpCardListsAllCommands(t *testing.T) {
-	card := BuildHelpCard(testPrefixes)
+	card := BuildHelpCard()
 	names := CommandNames()
 	if len(card.Commands) != len(names) {
 		t.Fatalf("卡片列出 %d 条，CommandNames 给出 %d 条", len(card.Commands), len(names))
@@ -307,7 +271,7 @@ func TestHelpCardSmokeWithRealBrowser(t *testing.T) {
 	}()
 
 	start := time.Now()
-	img, err := eng.Render(context.Background(), render.Card{Name: helpCardName, Data: BuildHelpCard(testPrefixes)})
+	img, err := eng.Render(context.Background(), render.Card{Name: helpCardName, Data: BuildHelpCard()})
 	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("渲染帮助卡失败：%v", err)

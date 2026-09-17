@@ -3,8 +3,7 @@ bot:
   token:           # BotFather 下发的 token
   owner:           # 拥有者 user id，0 表示不限制
   group_id:        # ★ 本机器人服务的群 id，群里的查询与推送都以此为准
-  msg_del_delay: 10 # 机器人消息自动删除延迟（秒），0 表示不删除
-  photo_del_delay: 0 # 图片消息自动删除延迟（秒），0 表示不删除
+  msg_del_delay: 10 # /ping 回复和无参数查询按钮的删除延迟（秒），0 使用默认 10 秒
   debug: false
 
 api:
@@ -43,8 +42,6 @@ render:
   timeout: 15      # 单张渲染超时（秒）
   format: png      # png | jpeg
 
-inline:
-  prefix: "星球-"   # 行内查询前缀，不能含空格或制表符
 
 translate:
   enabled: true              # 关掉后所有正文保持英文

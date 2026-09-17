@@ -20,7 +20,6 @@ func FormatEventsText(card EventsCard) string {
 	} else {
 		for _, item := range card.Items {
 			fmt.Fprintf(&b, "\n*%s*\n", bot.Escape(item.PlanetName))
-			fmt.Fprintf(&b, "编号：%s\n", bot.Escape(item.PlanetIndex))
 			fmt.Fprintf(&b, "进攻方：%s\n", bot.Escape(item.Faction))
 			fmt.Fprintf(&b, "起止：%s 至 %s\n", bot.Escape(item.StartTime), bot.Escape(item.EndTime))
 			if item.BarText != "" {

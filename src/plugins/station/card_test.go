@@ -201,7 +201,7 @@ func TestStationCardHTML(t *testing.T) {
 		}
 	}
 	// 三项已知战术行动各有图标：图标由 asset 函数内联成 data URI，这里按 img 元素数量断言。
-	if got := strings.Count(stations, `class="icon"`); got != 3 {
+	if got := strings.Count(stations, `class="dss-icon"`); got != 3 {
 		t.Errorf("应有 3 个战术行动图标，实际 %d 个", got)
 	}
 }

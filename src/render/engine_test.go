@@ -709,6 +709,9 @@ func TestRenderSmokeWithRealBrowser(t *testing.T) {
 	if os.Getenv("HD2_RENDER_SMOKE") != "1" {
 		t.Skip("未开启 HD2_RENDER_SMOKE，跳过真浏览器冒烟")
 	}
+	if err := PrepareRuntime(); err != nil {
+		t.Fatalf("准备浏览器运行环境失败：%v", err)
+	}
 
 	eng, err := New(Config{})
 	if err != nil {

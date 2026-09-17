@@ -242,6 +242,13 @@ func iconFunc(name string, class ...string) template.HTML {
 	if len(class) > 0 {
 		cls = strings.TrimSpace(class[0])
 	}
+	// 卡片头徽标按阵营着色；不要把一个通用 CSS fill 套到所有徽标上。
+	fill := map[string]string{
+		"emblem.super_earth": "#5BA3D0",
+		"emblem.automaton":   "#E74C3C",
+		"emblem.terminids":   "#F5C518",
+		"emblem.illuminate":  "#CF64F8",
+	}[name]
 	if strings.ToLower(path.Ext(dst)) != ".svg" {
 		// 位图：data URI 走 <img>，class 直接写在标签上。
 		uri := assetDataURI(name)
@@ -261,7 +268,11 @@ func iconFunc(name string, class ...string) template.HTML {
 		return template.HTML(inline)
 	}
 	// class 注入到根 <svg> 上：向量图标不能像 <img> 那样在外面套 class（那管不到 fill 继承）。
-	return template.HTML(renameSVGRoot(inline, cls))
+	root := renameSVGRoot(inline, cls)
+	if fill != "" && strings.Contains(cls, "card__emblem") {
+		root = strings.Replace(root, "<svg ", `<svg style="fill:`+fill+`" `, 1)
+	}
+	return template.HTML(root)
 }
 
 // inlineSVG 返回去掉了 XML 声明/DOCTYPE、并把内部 id 加上逻辑名前缀的 SVG 源码。

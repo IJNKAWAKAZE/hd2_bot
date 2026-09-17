@@ -17,7 +17,6 @@ func FormatAssignmentsText(card AssignmentsCard) string {
 	if card.Empty {
 		// 空列表是正常状态（实测上游就返回 []），文本回退也要这么说，不能写成查询失败。
 		b.WriteString("暂无重要指令。\n")
-		b.WriteString("上游当前没有进行中的重要指令，这是正常状态。\n")
 	} else {
 		fmt.Fprintf(&b, "进行中：%s 条\n", bot.Escape(card.Count))
 		for _, item := range card.Items {

@@ -288,11 +288,15 @@ func TestReplySplitsLongText(t *testing.T) {
 	}
 }
 
-// TestReplyDeletesAfterDelay 校验 msg_del_delay 大于 0 时机器人消息会被延迟删除。
-func TestReplyDeletesAfterDelay(t *testing.T) {
+// TestPingEscapesMarkdownAndDeletesAfterDelay 验证发送给 Telegram 的转义正文与延迟清理。
+func TestPingEscapesMarkdownAndDeletesAfterDelay(t *testing.T) {
 	b, fake := newTestBot(t, 30*time.Millisecond, 0, 0)
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("发送失败：%v", err)
+	}
+	form := fake.forms("sendMessage")[0]
+	if form.Get("parse_mode") != "MarkdownV2" || form.Get("text") != `Pong\!` {
+		t.Fatalf("ping 必须发送合法的 MarkdownV2 正文，实际 %v", form)
 	}
 	fake.waitForMethod(t, "deleteMessage")
 	if got := fake.forms("deleteMessage")[0].Get("message_id"); got != "777" {
@@ -303,7 +307,7 @@ func TestReplyDeletesAfterDelay(t *testing.T) {
 // TestReplySendError 校验发送失败返回带上下文的错误。
 func TestReplySendError(t *testing.T) {
 	b, _ := newTestBot(t, 0, http.StatusBadRequest, 0)
-	err := b.Reply(-100, "你好", 42)
+	err := b.Ping(-100, 0)
 	if err == nil {
 		t.Fatal("发送失败应返回错误")
 	}
@@ -364,7 +368,7 @@ func TestReplyDeleteSuccessLogsNothing(t *testing.T) {
 	time.Sleep(150 * time.Millisecond)
 	logs := captureLog(t)
 
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("发送失败：%v", err)
 	}
 	fake.waitForMethod(t, "deleteMessage")
@@ -380,7 +384,7 @@ func TestReplyDeleteFailureIsLogged(t *testing.T) {
 	b, fake := newTestBot(t, 10*time.Millisecond, 0, http.StatusBadRequest)
 	logs := captureLog(t)
 
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("删除失败不应让回复失败：%v", err)
 	}
 	fake.waitForMethod(t, "deleteMessage")
@@ -432,7 +436,7 @@ func TestDeleteRetriesTransientFailure(t *testing.T) {
 	fake.setDeleteFailFirst(2)
 	logs := captureLog(t)
 
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("发送失败：%v", err)
 	}
 	fake.waitForCount(t, "deleteMessage", 3)
@@ -453,7 +457,7 @@ func TestDeleteTreatsMessageGoneAsSuccess(t *testing.T) {
 	fake.setDeleteDesc("Bad Request: message to delete not found")
 	logs := captureLog(t)
 
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("发送失败：%v", err)
 	}
 	fake.waitForMethod(t, "deleteMessage")
@@ -474,7 +478,7 @@ func TestDeleteGivesUpAfterAttempts(t *testing.T) {
 	logs := captureLog(t)
 
 	// 删除失败不应该让回复本身失败
-	if err := b.Reply(-100, "你好", 42); err != nil {
+	if err := b.Ping(-100, 0); err != nil {
 		t.Fatalf("删除失败不应让回复失败：%v", err)
 	}
 	fake.waitForCount(t, "deleteMessage", deleteAttemptsDefault)

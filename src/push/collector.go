@@ -341,6 +341,10 @@ func summarizeBodies(events []Event) []Event {
 //
 // 卡片一旦拼好就尽力发出去：事件此刻已经记进去重表，半途放弃等于把它永久丢掉。
 func (c *Collector) send(ctx context.Context, events []Event, fetchedAt time.Time, translated bool) error {
+	if activity, ok := c.sender.(interface{ StartPhotoPreparation(int64) func() }); ok && c.renderer != nil {
+		stop := activity.StartPhotoPreparation(c.cfg.ChatID)
+		defer stop()
+	}
 	// build 按分页器给的区间与页码拼一页卡片；translateUnavailableNote 与页码都写进卡片底部的 Note。
 	build := func(page, pages, from, to, total int) Card {
 		card := BuildCard(events[from:to], fetchedAt, c.cfg.MaxItems)

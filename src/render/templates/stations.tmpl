@@ -1,46 +1,22 @@
-{{- /* stations 是 /stations 的民主空间站卡片：空间站基本信息 + 战术行动列表与状态。
-       用户 2026-09-17 要求删掉「空间站编号」「标记」两行与底部说明；战术行动不再显示上游 id32
-       （那是行动编号，不是剩余时间——上游没有给行动的剩余时间）。
-       视图模型是 Go 侧的 station.StationsCard；战术行动的图标逻辑名必须来自
-       src/render/assets.go 的 assetFiles 登记表，未命中时为空串（模板不显示图标）。 */ -}}
 {{define "body"}}
 {{if .Empty}}
-<section class="section">
-  <p class="empty">暂无空间站数据。</p>
-  <div class="muted">上游没有返回民主空间站信息。</div>
-</section>
-{{else}}
-<section class="section">
-  <div class="kpis">
-    <div class="kpi">
-      <div class="kpi__value">{{.Count}}</div>
-      <div class="kpi__label">空间站数量</div>
-    </div>
+<section class="section"><p class="empty">暂无空间站数据。</p></section>
+{{else}}{{range .Items}}
+<article class="dss-hud">
+  <header class="dss-top"><h2>{{.Name}}</h2><span>DSS</span></header>
+  <div class="dss-div"></div>
+  <div class="dss-grid">
+    <section><h3 class="dss-sec">战术行动</h3>
+      {{range .Actions}}<div class="dss-action">
+        {{if .Icon}}{{icon .Icon "dss-icon"}}{{else}}<span></span>{{end}}
+        <strong>{{.Name}}</strong><span class="tag {{.StatusClass}}">{{.Status}}</span>
+      </div>{{else}}<p class="empty">当前没有战术行动。</p>{{end}}
+    </section>
+    <section class="dss-summary">
+      <div class="dss-hero">{{icon "emblem.dss" "dss-station"}}</div>
+      <div class="dss-detail"><h3>选举 / 跃迁截止</h3><strong class="mono">{{.ElectionEnd}}</strong></div>
+    </section>
   </div>
-</section>
-
-{{range .Items}}
-<section class="section">
-  <h2 class="section__title">{{.Name}}</h2>
-  <div class="row"><span class="muted">选举 / 跃迁截止</span><span class="mono">{{.ElectionEnd}}</span></div>
-</section>
-
-<section class="section">
-  <h2 class="section__title">战术行动</h2>
-  {{if .Actions}}
-  <ul class="list">
-    {{range .Actions}}
-    <li class="list__item">
-      {{if .Icon}}{{icon .Icon "icon"}}{{end}}
-      <span class="grow strong">{{.Name}}</span>
-      <span class="tag {{.StatusClass}}">{{.Status}}</span>
-    </li>
-    {{end}}
-  </ul>
-  {{else}}
-  <p class="empty">当前没有战术行动。</p>
-  {{end}}
-</section>
-{{end}}
-{{end}}
+</article>
+{{end}}{{end}}
 {{end}}

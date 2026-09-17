@@ -24,7 +24,7 @@ func TestFormatEquipmentTextDetail(t *testing.T) {
 			English: "AR-2 Coyote",
 			Model:   "AR-2",
 			Tags:    []string{"主武器", "突击步枪"},
-			Acquire: "军需簿「沙漠魔影」",
+			Acquire: "债券「沙漠魔影」",
 			Arrows: []ArrowStep{
 				{Asset: "arrow.down", Glyph: "↓"},
 				{Asset: "arrow.up", Glyph: "↑"},
@@ -50,7 +50,7 @@ func TestFormatEquipmentTextDetail(t *testing.T) {
 		bot.Escape("AR-2"),
 		bot.Escape("AR-2 Coyote"),
 		bot.Escape("主武器 ｜ 突击步枪"),
-		bot.Escape("获取：军需簿「沙漠魔影」"),
+		bot.Escape("获取：债券「沙漠魔影」"),
 		bot.Escape("召唤指令 ↓ ↑ ←"),
 		bot.Escape("操作性"),
 		bot.Escape("弹匣 45 发 ｜ 射速 600 发/分"),
@@ -111,7 +111,7 @@ func TestFormatEquipmentTextEmpty(t *testing.T) {
 // TestFormatWarbondsTextDetail 校验明细文本：名称、页数/勋章/价格一行、装备列表与截断说明。
 func TestFormatWarbondsTextDetail(t *testing.T) {
 	card := WarbondsCard{
-		Meta:  render.Meta{Title: "军需簿", DataTime: "2026-08-14 11:25"},
+		Meta:  render.Meta{Title: "债券", DataTime: "2026-08-14 11:25"},
 		Intro: "关键字「沙漠魔影」命中：沙漠魔影",
 		Detail: &WarbondDetail{
 			Name:    "沙漠魔影",
@@ -120,7 +120,7 @@ func TestFormatWarbondsTextDetail(t *testing.T) {
 			Medals:  "60 勋章",
 			Credits: "1,000",
 			Items: []WarbondItem{
-				{Name: "野狼", Kind: "主武器", Acquire: "军需簿「沙漠魔影」 · 第 1 页"},
+				{Name: "野狼", Kind: "主武器", Acquire: "债券「沙漠魔影」 · 第 1 页"},
 				{Name: "撞击手雷", Kind: "手雷"},
 			},
 			More: "另有 2 件未列出。",
@@ -129,7 +129,7 @@ func TestFormatWarbondsTextDetail(t *testing.T) {
 	}
 	text := FormatWarbondsText(card)
 	for _, want := range []string{
-		"*军需簿*",
+		"*债券*",
 		bot.Escape("沙漠魔影"),
 		bot.Escape("Dust Devils"),
 		bot.Escape("页数：1 页 ｜ 勋章：60 勋章 ｜ 价格：1,000"),
@@ -144,11 +144,11 @@ func TestFormatWarbondsTextDetail(t *testing.T) {
 	}
 }
 
-// TestFormatWarbondsTextListAndEmpty 校验名单文本与「目录里没有军需簿」的提示。
+// TestFormatWarbondsTextListAndEmpty 校验名单文本与「目录里没有债券」的提示。
 func TestFormatWarbondsTextListAndEmpty(t *testing.T) {
 	card := WarbondsCard{
-		Meta:  render.Meta{Title: "军需簿"},
-		Intro: "全部军需簿，按目录顺序排列。",
+		Meta:  render.Meta{Title: "债券"},
+		Intro: "全部债券，按目录顺序排列。",
 		Books: []WarbondRow{{Name: "沙漠魔影", English: "Dust Devils", Pages: "1 页", Medals: "60 勋章", Credits: "1,000", Items: "1 件"}},
 		Notes: []string{"价格栏的「—」表示这本不单卖。"},
 	}
@@ -159,8 +159,8 @@ func TestFormatWarbondsTextListAndEmpty(t *testing.T) {
 		}
 	}
 
-	empty := FormatWarbondsText(WarbondsCard{Meta: render.Meta{Title: "军需簿"}, Empty: "目录里没有军需簿数据。"})
-	if !strings.Contains(empty, bot.Escape("目录里没有军需簿数据。")) {
+	empty := FormatWarbondsText(WarbondsCard{Meta: render.Meta{Title: "债券"}, Empty: "目录里没有债券数据。"})
+	if !strings.Contains(empty, bot.Escape("目录里没有债券数据。")) {
 		t.Errorf("空名单应给出提示：\n%s", empty)
 	}
 	if strings.Contains(empty, "装备：") {
@@ -171,7 +171,7 @@ func TestFormatWarbondsTextListAndEmpty(t *testing.T) {
 // TestFormatWarbondsTextEmptyDetail 校验明细里一件装备都没有时的说明。
 func TestFormatWarbondsTextEmptyDetail(t *testing.T) {
 	card := WarbondsCard{
-		Meta:   render.Meta{Title: "军需簿"},
+		Meta:   render.Meta{Title: "债券"},
 		Detail: &WarbondDetail{Name: "测试本", Pages: "1 页", Medals: "1 勋章", Credits: "—"},
 	}
 	text := FormatWarbondsText(card)
@@ -211,7 +211,6 @@ func TestFormatEnemyText(t *testing.T) {
 		bot.Escape("终结族 ｜ 巨型"),
 		bot.Escape("阵营 终结族 ｜ 体型 巨型 ｜ 总生命值 6,500 ｜ 伤害 【酸液】950；【近战】1000"),
 		bot.Escape("同阵营：食腐虫（小型）"),
-		bot.Escape("来源：https://helldivers.wiki.gg/wiki/Bile_Titan"),
 		bot.Escape("派系变体（例如 Jet Brigade）沿用上游原文，加了新变体时不会被硬塞进某个阵营。"),
 	} {
 		if !strings.Contains(text, want) {

@@ -4,7 +4,7 @@
        卡片外壳（标题、数据时间、过期角标、页脚）由 base.tmpl 统一渲染，这里只定义 body 片段。 */ -}}
 {{define "body"}}
 <section class="section">
-  <div class="kpis">
+  <div class="kpis war-kpis">
     <div class="kpi">
       <div class="kpi__value">{{.PlayerCount}}</div>
       <div class="kpi__label">在线士兵</div>
@@ -13,10 +13,10 @@
       <div class="kpi__value">{{.SuccessRate}}</div>
       <div class="kpi__label">任务成功率</div>
     </div>
-    {{/* 胜负两个数字同字号：原先「负」写在标签行里是小字，用户 2026-09-17 要求改齐 */}}
-    <div class="kpi">
-      <div class="kpi__value"><span class="tag tag--win">胜</span> {{.MissionsWon}}</div>
-      <div class="kpi__value"><span class="tag tag--loss">负</span> {{.MissionsLost}}</div>
+    {{/* 胜负独立两行：标签固定宽度，数字右对齐，不在千分位处折行。 */}}
+    <div class="kpi war-results">
+      <div class="war-result"><span class="tag tag--win">胜</span><span class="war-result__value">{{.MissionsWon}}</span></div>
+      <div class="war-result"><span class="tag tag--loss">负</span><span class="war-result__value">{{.MissionsLost}}</span></div>
       <div class="kpi__label">任务胜负</div>
     </div>
   </div>

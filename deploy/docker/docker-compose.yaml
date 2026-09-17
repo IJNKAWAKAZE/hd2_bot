@@ -1,0 +1,30 @@
+services:
+  hd2:
+    image: hd2-bot:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    restart: unless-stopped
+    init: true
+    working_dir: /app
+    # Preserve localhost API URLs and the existing HTTP bind address on Linux.
+    network_mode: host
+    shm_size: "1gb"
+    volumes:
+      - type: bind
+        source: ./hd2.yaml
+        target: /app/hd2.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data
+        target: /app/data
+        bind:
+          create_host_path: false
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

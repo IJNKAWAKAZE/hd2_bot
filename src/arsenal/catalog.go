@@ -1,4 +1,4 @@
-// Package arsenal 是《绝地潜兵 2》装备目录（军需簿 + 武器 / 战备 / 护甲 / 手雷）的数据层：
+// Package arsenal 是《绝地潜兵 2》装备目录（债券 + 武器 / 战备 / 护甲 / 手雷）的数据层：
 // 拉取上游目录、落本地缓存、按关键字检索，并按需下载装备图。
 //
 // 数据来源与许可：目录数据取自开源项目 SalmonC/HD2Tool（MIT License）的
@@ -57,7 +57,7 @@ func KindLabel(k Kind) string {
 
 // acqLabels 是获取方式中文名，键是上游 acquisition.kind 的原值。
 var acqLabels = map[string]string{
-	"warbond":     "军需簿",
+	"warbond":     "债券",
 	"requisition": "征用点",
 	"superstore":  "超级商店",
 	"event":       "活动奖励",
@@ -117,7 +117,7 @@ type Deploy struct {
 }
 
 // Acquisition 是「怎么拿到这件装备」。Kind 决定哪几个字段有意义：
-// 军需簿看 WarbondID/Page/ItemMedals，征用点看 LevelRequired/RequisitionPoints，超级商店等只有 Kind。
+// 债券看 WarbondID/Page/ItemMedals，征用点看 LevelRequired/RequisitionPoints，超级商店等只有 Kind。
 type Acquisition struct {
 	Kind              string
 	WarbondID         string
@@ -149,7 +149,7 @@ type Item struct {
 	Deploy        *Deploy
 }
 
-// Warbond 是一本军需簿（债券）：页数、解锁所需勋章、超级货币价。
+// Warbond 是一本债券（债券）：页数、解锁所需勋章、超级货币价。
 type Warbond struct {
 	ID           string
 	NameZh       string

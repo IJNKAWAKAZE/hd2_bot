@@ -14,6 +14,7 @@ import (
 	"log"
 	"strings"
 	"testing"
+	"time"
 
 	tgbotapi "github.com/ijnkawakaze/telegram-bot-api"
 
@@ -62,6 +63,24 @@ func (s *Sender) Reply(chatID int64, text string, replyTo int64) error {
 	s.Chats = append(s.Chats, chatID)
 	s.ReplyTo = append(s.ReplyTo, replyTo)
 	return s.Err
+}
+
+// Ping 记录专用的自动清理回复。
+func (s *Sender) Ping(chatID, commandID int64) error {
+	s.Calls = append(s.Calls, "ping")
+	s.Chats = append(s.Chats, chatID)
+	s.ReplyTo = append(s.ReplyTo, commandID)
+	return s.Err
+}
+
+func (s *Sender) DeleteMessage(chatID, messageID int64) error {
+	s.Calls = append(s.Calls, "delete")
+	s.Chats = append(s.Chats, chatID)
+	return s.Err
+}
+
+func (s *Sender) SendTemporaryTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, _ time.Duration) error {
+	return s.SendTextWithKeyboard(chatID, text, markup)
 }
 
 // SendPhoto 记录一次图片发送。

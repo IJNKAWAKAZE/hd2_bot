@@ -27,6 +27,38 @@ var (
 	_ render.Renderer = (*render.Engine)(nil)
 )
 
+func TestTranslatedFallbackReusesRenderedContent(t *testing.T) {
+	for _, command := range []string{"assignments", "dispatches"} {
+		t.Run(command, func(t *testing.T) {
+			s := &plugtest.Sender{GroupID: -100}
+			svc := &fakeService{
+				assignments: hd2.Result[[]hd2.Assignment]{Value: []hd2.Assignment{{Title: "Defend democracy", Briefing: "Hold this planet"}}},
+				dispatches:  hd2.Result[[]hd2.Dispatch]{Value: []hd2.Dispatch{{Message: "Hold this planet"}}},
+			}
+			translated := []string{"守住这颗星球"}
+			if command == "assignments" {
+				translated = []string{"保卫民主", "守住这颗星球"}
+			}
+			tr := &plugtest.Translator{Out: translated}
+			r := plugtest.FailRenderer()
+			if err := runHandlerWith(t, command, s, svc, r, tr, plugtest.MessageUpdate(-100, "/"+command)); err != nil {
+				t.Fatal(err)
+			}
+			if len(s.Replies) != 1 || !strings.Contains(s.Replies[0], "守住这颗星球") || strings.Contains(s.Replies[0], "Hold this planet") {
+				t.Fatalf("translated fallback lost: %v", s.Replies)
+			}
+			if tr.Calls() != 1 {
+				t.Fatalf("translation called %d times", tr.Calls())
+			}
+			for _, call := range s.Calls {
+				if call == "delete" {
+					t.Fatal("fallback must preserve command")
+				}
+			}
+		})
+	}
+}
+
 // testChatID 是本插件用例统一使用的群 id；机器人只服务配置里指定的这一个群，
 // 其它会话的指令一律忽略，用例因此都拿它当唯一会话。
 const testChatID int64 = -100

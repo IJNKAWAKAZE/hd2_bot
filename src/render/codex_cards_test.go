@@ -16,8 +16,8 @@ import (
 	"hd2_bot/src/render"
 )
 
-// codexFixtureJSON 是一份够排版用的小目录：一件主武器（带弹匣/射速/召唤指令/军需簿来源）、
-// 一件护甲、一本军需簿。
+// codexFixtureJSON 是一份够排版用的小目录：一件主武器（带弹匣/射速/召唤指令/债券来源）、
+// 一件护甲、一本债券。
 const codexFixtureJSON = `{
   "meta": {"dataVersion": "2026.08.14.1", "capturedAt": "2026-08-14T03:25:51.159Z"},
   "warbonds": [
@@ -98,7 +98,7 @@ func TestEquipmentCardHTML(t *testing.T) {
 		`<h2 class="panel__head">攻击部件</h2>`,
 		`<span class="summon__k">召唤指令</span>`,
 		`<span class="summon__arrow"><svg`, // 召唤指令的箭头是内联的游戏箭头图形
-		"军需簿「沙漠魔影」",
+		"债券「沙漠魔影」",
 	} {
 		if !strings.Contains(html, want) {
 			t.Errorf("装备卡片 HTML 缺少 %q", want)
@@ -154,17 +154,17 @@ func TestEquipmentCardHTMLEmpty(t *testing.T) {
 	}
 }
 
-// TestWarbondsCardHTMLLists 校验军需簿名单分支：标题、名称、页数、勋章、价格与件数。
+// TestWarbondsCardHTMLLists 校验债券名单分支：标题、名称、页数、勋章、价格与件数。
 func TestWarbondsCardHTMLLists(t *testing.T) {
 	catalog := codexFixtureCatalog(t)
 	card := codex.BuildWarbondsCard(catalog.Warbonds(), nil, "", time.Date(2026, 8, 14, 11, 25, 0, 0, time.UTC))
 	html, err := render.HTML(render.Card{Name: "warbonds", Data: card})
 	if err != nil {
-		t.Fatalf("渲染军需簿卡片 HTML 失败：%v", err)
+		t.Fatalf("渲染债券卡片 HTML 失败：%v", err)
 	}
-	for _, want := range []string{"军需簿", "全部军需簿", "沙漠魔影", "Dust Devils", "2 页", "60 勋章", "1,000", "2 件", `class="card__emblem"`} {
+	for _, want := range []string{"债券", "全部债券", "沙漠魔影", "Dust Devils", "2 页", "60 勋章", "1,000", "2 件", `class="card__emblem"`} {
 		if !strings.Contains(html, want) {
-			t.Errorf("军需簿名单 HTML 缺少 %q", want)
+			t.Errorf("债券名单 HTML 缺少 %q", want)
 		}
 	}
 	if strings.Contains(html, "<h2 class=\"section__title\">装备</h2>") {
@@ -172,7 +172,7 @@ func TestWarbondsCardHTMLLists(t *testing.T) {
 	}
 }
 
-// TestWarbondsCardHTMLDetail 校验军需簿明细分支：页数/勋章/价格三行、装备列表与截断说明。
+// TestWarbondsCardHTMLDetail 校验债券明细分支：页数/勋章/价格三行、装备列表与截断说明。
 func TestWarbondsCardHTMLDetail(t *testing.T) {
 	catalog := codexFixtureCatalog(t)
 	book, ok := catalog.Warbond("dust-devils")
@@ -184,14 +184,14 @@ func TestWarbondsCardHTMLDetail(t *testing.T) {
 
 	html, err := render.HTML(render.Card{Name: "warbonds", Data: card})
 	if err != nil {
-		t.Fatalf("渲染军需簿明细 HTML 失败：%v", err)
+		t.Fatalf("渲染债券明细 HTML 失败：%v", err)
 	}
 	for _, want := range []string{"沙漠魔影", "全部解锁勋章", "超级货币", "装备", "野狼", "主武器", "A-35“侦察者”"} {
 		if !strings.Contains(html, want) {
-			t.Errorf("军需簿明细 HTML 缺少 %q", want)
+			t.Errorf("债券明细 HTML 缺少 %q", want)
 		}
 	}
-	if strings.Contains(html, "全部军需簿") {
+	if strings.Contains(html, "全部债券") {
 		t.Error("明细分支不该出现名单小节")
 	}
 }
@@ -250,8 +250,8 @@ func TestEnemyCardHTML(t *testing.T) {
 			t.Errorf("敌人卡片 HTML 不该出现 %q", unwanted)
 		}
 	}
-	if !strings.Contains(html, `<h2 class="panel__head">来源</h2>`) {
-		t.Error("敌人卡片该有「来源」侧栏")
+	if strings.Contains(html, `<h2 class="panel__head">来源</h2>`) {
+		t.Error("敌人卡片不该有「来源」侧栏")
 	}
 	if strings.Contains(html, "没有这只敌人") {
 		t.Error("有命中时不该出空结果提示")
@@ -276,7 +276,7 @@ func TestEquipmentDetailCardHTML(t *testing.T) {
 		"野狼",
 		"AR-2 Coyote",
 		`<div class="chips"><span class="chip">主武器</span></div>`,
-		"获取：军需簿「沙漠魔影」",
+		"获取：债券「沙漠魔影」",
 		`<span class="summon__arrow"><svg`,                // 召唤指令的箭头是内联的游戏箭头图形
 		`points="12,21 5,13 10,13 10,3 14,3 14,13 19,13"`, // 向下箭头（↓）的形状
 		`<h2 class="panel__head">详细数据</h2>`,

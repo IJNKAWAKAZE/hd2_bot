@@ -9,7 +9,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
-	"unicode"
 
 	"github.com/spf13/viper"
 )
@@ -28,7 +27,6 @@ type Config struct {
 	Limit     LimitConfig     `mapstructure:"limit"`
 	HTTP      HTTPConfig      `mapstructure:"http"`
 	Render    RenderConfig    `mapstructure:"render"`
-	Inline    InlineConfig    `mapstructure:"inline"`
 	Translate TranslateConfig `mapstructure:"translate"`
 	Push      PushConfig      `mapstructure:"push"`
 	Arsenal   ArsenalConfig   `mapstructure:"arsenal"`
@@ -37,13 +35,12 @@ type Config struct {
 
 // BotConfig 机器人自身与目标群相关配置。
 type BotConfig struct {
-	Name          string  `mapstructure:"name"`
-	Token         string  `mapstructure:"token"`
-	Owner         int64   `mapstructure:"owner"`
-	GroupID       int64   `mapstructure:"group_id"`
-	MsgDelDelay   float64 `mapstructure:"msg_del_delay"`
-	PhotoDelDelay float64 `mapstructure:"photo_del_delay"`
-	Debug         bool    `mapstructure:"debug"`
+	Name        string  `mapstructure:"name"`
+	Token       string  `mapstructure:"token"`
+	Owner       int64   `mapstructure:"owner"`
+	GroupID     int64   `mapstructure:"group_id"`
+	MsgDelDelay float64 `mapstructure:"msg_del_delay"`
+	Debug       bool    `mapstructure:"debug"`
 }
 
 // APIConfig 上游接口相关配置。
@@ -92,12 +89,6 @@ type RenderConfig struct {
 	Scale   int     `mapstructure:"scale"`   // 设备缩放，2 表示二倍图
 	Timeout float64 `mapstructure:"timeout"` // 单张渲染超时（秒）
 	Format  string  `mapstructure:"format"`  // 输出格式，只允许 png 或 jpeg
-}
-
-// InlineConfig 行内查询相关配置；Prefix 会与用户输入的关键字拼接后匹配，
-// 因此不能为空，也不能包含空白字符。
-type InlineConfig struct {
-	Prefix string `mapstructure:"prefix"`
 }
 
 // TranslateConfig 翻译层配置；Enabled 为 false 时所有正文保持英文，其余字段不再校验，
@@ -194,7 +185,6 @@ func Get() *Config { return current.Load() }
 // setDefaults 写入所有可省略字段的默认值。
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("bot.msg_del_delay", 10)
-	v.SetDefault("bot.photo_del_delay", 0)
 	v.SetDefault("api.user_agent", "hd2_bot/0.1")
 	v.SetDefault("api.timeout", 30)
 	v.SetDefault("api.base_helldivers", "https://api.helldivers2.dev/api/v1")
@@ -222,7 +212,6 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("render.scale", 2)
 	v.SetDefault("render.timeout", 15)
 	v.SetDefault("render.format", "png")
-	v.SetDefault("inline.prefix", "星球-")
 	v.SetDefault("translate.enabled", true)
 	v.SetDefault("translate.mode", "auto")
 	v.SetDefault("translate.model", "gpt-4o-mini")
@@ -330,19 +319,6 @@ func (c *Config) Validate() error {
 		default:
 			errs = append(errs, fmt.Errorf("render.format 只能是 png 或 jpeg（大小写不敏感），实际为 %q", c.Render.Format))
 		}
-	}
-
-	// 图片消息延迟删除：0 表示不删除并长期保留，负数没有意义。
-	if c.Bot.PhotoDelDelay < 0 {
-		errs = append(errs, errors.New("bot.photo_del_delay 不能为负数（0 表示不删除）"))
-	}
-
-	// 行内查询前缀会与用户输入的关键字拼接，任何空白字符（含制表符、全角空格、换行）都会让
-	// 「前缀 + 关键字」的解析出现歧义，所以用 unicode.IsSpace 而不是只判空格和制表符。
-	if c.Inline.Prefix == "" {
-		errs = append(errs, errors.New("inline.prefix 不能为空（行内查询需要用它拼出查询关键字）"))
-	} else if strings.IndexFunc(c.Inline.Prefix, unicode.IsSpace) >= 0 {
-		errs = append(errs, fmt.Errorf("inline.prefix 不能包含空白字符（空格、制表符、全角空格等），实际为 %q", c.Inline.Prefix))
 	}
 
 	// 翻译段：关闭时全部放行；开启时校验成一个「能真的发得出去请求」的配置。

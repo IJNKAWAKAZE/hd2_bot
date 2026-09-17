@@ -24,13 +24,17 @@ type Handler struct {
 // Sender 是插件回消息所需的最小接口；*Bot 实现了它，测试可以注入假实现。
 // 插件只能通过它发消息，不允许直接接触 Telegram 客户端。
 type Sender interface {
+	// Ping 是唯一自动清理指令与回复的发送入口。
+	Ping(chatID, commandID int64) error
 	// Reply 以 MarkdownV2 回复文本，超长自动分片；replyTo 为 0 时不引用消息。
 	Reply(chatID int64, text string, replyTo int64) error
 	// SendPhoto 发送一张图片卡片；replyTo 为 0 时不引用消息。
-	// 图片是否延迟删除由 bot.photo_del_delay 决定，默认（0）留在群里。
+	// 图片始终保留。
 	SendPhoto(chatID int64, png []byte, replyTo int64) error
 	// SendTextWithKeyboard 以 MarkdownV2 发送文本，并把内联键盘只挂在第一片上。
 	SendTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error
+	SendTemporaryTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, delay time.Duration) error
+	DeleteMessage(chatID, messageID int64) error
 	// SendChatAction 发送「正在上传图片」之类的状态提示；失败只记日志，不上抛错误，
 	// 因此没有返回值：所有调用方（包括本包的发图流程）都只会把它当成一次尽力而为的提示。
 	SendChatAction(chatID int64, action string)
@@ -43,9 +47,6 @@ type Bot struct {
 	api      *tgbotapi.Bot
 	groupID  int64
 	msgDelay time.Duration
-	// photoDelay 是图片消息的自动删除延迟；0 表示不删图片。
-	// 默认不删是用户决策：群里看图需要时间，只有显式配置了 photo_del_delay 才跟着文本一起清理。
-	photoDelay time.Duration
 	// delAttempts、delRetryDelay 是删除消息的最大尝试次数与两次尝试之间的间隔；
 	// 零值使用 deleteAttemptsDefault / deleteRetryDelayDefault，测试里可以注入更小的值。
 	delAttempts   int
@@ -66,19 +67,17 @@ var (
 	initRetryDelay = initRetryDelayDefault
 )
 
-// New 创建机器人实例；groupID 是唯一服务的群。
-// msgDelay 是文本消息的自动删除延迟，photoDelay 是图片消息的自动删除延迟，0 均表示不删除
-// （图片默认不删：群里看图需要时间，只有显式配置 photo_del_delay 才清理）。
+// New 创建机器人实例；groupID 是唯一服务的群。msgDelay 控制 /ping 回复和临时查询按钮的删除延迟，
 // ownerID 只影响库里的 RequireOwner 包装，而命令是用 NewCommandProcessor 注册的，
 // 因此它对 /ping、/help、/war 都不起作用（任何群成员都能用）；配置里的 owner 目前是预留项。
-func New(token string, ownerID, groupID int64, msgDelay, photoDelay time.Duration) (*Bot, error) {
+func New(token string, ownerID, groupID int64, msgDelay time.Duration) (*Bot, error) {
 	api, err := connectTelegram(token)
 	if err != nil {
 		return nil, fmt.Errorf("初始化 Telegram 机器人失败：%w", err)
 	}
 	handle := api.AddHandle()
 	handle.SetOwnerID(ownerID)
-	return &Bot{api: handle, groupID: groupID, msgDelay: msgDelay, photoDelay: photoDelay}, nil
+	return &Bot{api: handle, groupID: groupID, msgDelay: msgDelay}, nil
 }
 
 // connectTelegram 建立 Telegram 连接，失败按间隔重试，重试用尽返回最后一次的错误。
@@ -106,21 +105,74 @@ func (b *Bot) IsTargetChat(chatID int64) bool {
 	return b.groupID == 0 || chatID == b.groupID
 }
 
+// DeleteMessage 删除机器人有权限删除的消息。
+func (b *Bot) DeleteMessage(chatID, messageID int64) error {
+	_, err := b.api.Request(tgbotapi.NewDeleteMessage(chatID, messageID))
+	return err
+}
+
 // Register 批量注册指令；同名指令后注册者生效。指令名不含斜杠，例如 "war" 对应 /war。
 func (b *Bot) Register(handlers []Handler) {
 	for _, h := range handlers {
-		b.api.NewCommandProcessor(h.Name, async(h.Run))
+		b.api.NewCommandProcessor(h.Name, async(func(update tgbotapi.Update) error {
+			if h.Name == "ping" || update.Message == nil || update.Message.Chat == nil || !b.IsTargetChat(update.Message.Chat.ID) {
+				return h.Run(update)
+			}
+			stop := b.StartPhotoPreparation(update.Message.Chat.ID)
+			defer stop()
+			return h.Run(update)
+		}))
 		log.Printf("已注册指令 /%s", h.Name)
 	}
+}
+
+// StartPhotoPreparation 在取数、翻译和渲染期间持续显示上传图片状态。
+// Telegram 状态约 5 秒失效，因此每 4 秒刷新，结束时等待后台循环退出。
+func (b *Bot) StartPhotoPreparation(chatID int64) func() {
+	b.SendChatAction(chatID, actionUploadPhoto)
+	done, stopped := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(stopped)
+		ticker := time.NewTicker(4 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				b.SendChatAction(chatID, actionUploadPhoto)
+			}
+		}
+	}()
+	return func() { close(done); <-stopped }
 }
 
 // Run 开始阻塞监听消息，直到进程退出。
 func (b *Bot) Run() { b.api.Run() }
 
 // Reply 以 MarkdownV2 回复文本，超长自动分片；replyTo 为 0 时不引用消息。
-// 只有第一片引用原消息，后续分片单独发送；msgDelay 大于 0 时发送成功的消息会被延迟删除，
-// 删除失败只记日志，不影响本次回复。
+// 只有第一片引用原消息，后续分片单独发送；普通回复不会自动删除。
 func (b *Bot) Reply(chatID int64, text string, replyTo int64) error {
+	return b.reply(chatID, text, replyTo, 0)
+}
+
+// Ping 先发送独立回复，再清理指令；回复按配置延迟清理，默认 10 秒。
+func (b *Bot) Ping(chatID, commandID int64) error {
+	delay := b.msgDelay
+	if delay <= 0 {
+		delay = 10 * time.Second
+	}
+	// Reply 使用 MarkdownV2；感叹号必须转义，否则 Telegram 会拒收实体。
+	if err := b.reply(chatID, Escape("Pong!"), 0, delay); err != nil {
+		return err
+	}
+	if commandID != 0 {
+		b.deleteMessage(chatID, commandID)
+	}
+	return nil
+}
+
+func (b *Bot) reply(chatID int64, text string, replyTo int64, delay time.Duration) error {
 	for i, chunk := range SplitText(text, maxMessageLen) {
 		var (
 			msg tgbotapi.Message
@@ -134,8 +186,8 @@ func (b *Bot) Reply(chatID int64, text string, replyTo int64) error {
 		if err != nil {
 			return fmt.Errorf("发送消息失败：%w", err)
 		}
-		if b.msgDelay > 0 && msg.MessageID != 0 {
-			b.deleteLater(chatID, msg.MessageID)
+		if delay > 0 && msg.MessageID != 0 {
+			b.deleteLaterAfter(delay, chatID, msg.MessageID)
 		}
 	}
 	return nil
@@ -144,8 +196,7 @@ func (b *Bot) Reply(chatID int64, text string, replyTo int64) error {
 // SendPhoto 发送一张图片卡片；replyTo 非 0 时引用原消息。
 // 发送前先发 upload_photo 状态提示，让群友知道机器人正在出图；
 // 图片不带 caption 与 ParseMode：卡片文案已经渲染进图片里，再挂文本只会重复。
-// 成功后只在 photoDelay > 0 时注册延迟删除：默认（photo_del_delay=0）不删图片，
-// 因为群里看图需要时间，删早了群友就只剩「图片已删除」。
+// 图片不会自动删除，因为群里需要长期查看卡片。
 // 失败返回带中文上下文的错误，由调用方决定是否回退纯文本。
 // actionUploadPhoto 是 Telegram 的「正在上传图片」状态提示名：SendPhoto 发图前先发它，
 // 让群友知道机器人正在出图（渲染一张卡片要几百毫秒）。
@@ -158,12 +209,9 @@ func (b *Bot) SendPhoto(chatID int64, png []byte, replyTo int64) error {
 	if replyTo != 0 {
 		photo.ReplyToMessageID = replyTo
 	}
-	msg, err := b.api.Send(photo)
+	_, err := b.api.Send(photo)
 	if err != nil {
 		return fmt.Errorf("发送图片失败：%w", err)
-	}
-	if b.photoDelay > 0 && msg.MessageID != 0 {
-		b.deleteLaterAfter(b.photoDelay, chatID, msg.MessageID)
 	}
 	return nil
 }
@@ -172,8 +220,23 @@ func (b *Bot) SendPhoto(chatID int64, png []byte, replyTo int64) error {
 // 超长文本复用 SplitText 分片（Telegram 单条上限是按 UTF-16 码元算的 4096）；
 // 按钮只挂第一片：多片重复挂既冗余，前面几片被自动删除后还会留下解释不清的按钮。
 // 空键盘（一行按钮都没有）会被 Telegram 拒收，此时等价于普通文本消息。
-// msgDelay 大于 0 时发送成功的分片会被延迟删除，删除失败只记日志。
+// 普通带按钮消息不会自动删除。
 func (b *Bot) SendTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error {
+	return b.sendTextWithKeyboard(chatID, text, markup, 0)
+}
+
+// SendTemporaryTextWithKeyboard 发送带按钮的临时提示，并在 delay 后删除。
+func (b *Bot) SendTemporaryTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, delay time.Duration) error {
+	if delay <= 0 {
+		delay = b.msgDelay
+		if delay <= 0 {
+			delay = 10 * time.Second
+		}
+	}
+	return b.sendTextWithKeyboard(chatID, text, markup, delay)
+}
+
+func (b *Bot) sendTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, delay time.Duration) error {
 	for i, chunk := range SplitText(text, maxMessageLen) {
 		msg := tgbotapi.NewMessage(chatID, chunk)
 		msg.ParseMode = tgbotapi.ModeMarkdownV2
@@ -184,8 +247,8 @@ func (b *Bot) SendTextWithKeyboard(chatID int64, text string, markup tgbotapi.In
 		if err != nil {
 			return fmt.Errorf("发送带按钮的消息失败：%w", err)
 		}
-		if b.msgDelay > 0 && sent.MessageID != 0 {
-			b.deleteLater(chatID, sent.MessageID)
+		if delay > 0 && sent.MessageID != 0 {
+			b.deleteLaterAfter(delay, chatID, sent.MessageID)
 		}
 	}
 	return nil
@@ -260,13 +323,7 @@ const (
 	deleteRetryDelayDefault = 2 * time.Second
 )
 
-// deleteLater 延迟删除机器人自己发出的消息，保持群内整洁；失败只记日志。
-// 用 time.AfterFunc 而不是「go + time.Sleep」：等待期间不占用 goroutine，消息多时也不会堆积。
-func (b *Bot) deleteLater(chatID, messageID int64) {
-	b.deleteLaterAfter(b.msgDelay, chatID, messageID)
-}
-
-// deleteLaterAfter 按指定延迟删除机器人自己发出的消息；图片用 photoDelay、文本用 msgDelay。
+// deleteLaterAfter 按指定延迟删除 /ping 回复。
 // 注意 delay <= 0 会立即触发删除（等同于马上删），所以调用方必须先判掉「不删」的情况，
 // 本函数不做这层判断，避免把「立即删除」这种合法用法也一起禁掉。
 func (b *Bot) deleteLaterAfter(delay time.Duration, chatID, messageID int64) {

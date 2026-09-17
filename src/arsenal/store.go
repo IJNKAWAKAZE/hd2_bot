@@ -326,7 +326,7 @@ func (s *Store) ThumbURL(ctx context.Context, item Item) string {
 		// 让调用方干净地少一个图标，而不是收到一个 Telegram 抓不动、抓到了也显示不了的地址；
 		// 但把「这一页没有位图」记下来，省掉后面每次查询为同一个文件再问一次 wiki。
 		s.markThumbMissing(item.ImageFilePage)
-		s.log("[arsenal] 上游对 SVG 不开位图缩略图，这条结果不带图标（属正常情况）：%s", url)
+		// 上游没有提供 SVG 的位图缩略图；这是正常的无图结果，不刷错误日志。
 		return ""
 	}
 	s.storeThumb(item.ImageFilePage, url)

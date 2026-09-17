@@ -132,6 +132,12 @@
   }
   .kpi__value { font-size: 32px; line-height: 1.2; font-weight: 700; color: var(--yellow-2); font-variant-numeric: tabular-nums; }
   .kpi__label { margin-top: 2px; font-size: 13px; letter-spacing: .5px; color: var(--text-dim); }
+  /* 银河战况：累计任务数比在线人数长，胜负面板分配更宽空间。 */
+  .war-kpis { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(320px, 1.65fr); }
+  .war-result { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .war-result + .war-result { margin-top: 6px; }
+  .war-result .tag { flex: 0 0 auto; }
+  .war-result__value { white-space: nowrap; text-align: right; font-size: 24px; line-height: 1.25; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--yellow-2); }
   .list { margin: 0; padding: 0; list-style: none; }
   .list__item { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
   .list__item:last-child { border-bottom: 0; }
@@ -364,6 +370,8 @@
   /* 外观大图：参照站是整块大图（.arena 那块），这里同宽居中，图本身按 contain 缩放。 */
   .hero__img { display: flex; align-items: center; justify-content: center; padding: 10px; background: var(--panel-2); border: 1px solid var(--line-2); }
   .hero__img img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; }
+  .hero__img--compact { padding: 12px; margin-bottom: 10px; }
+  .hero__img--compact img { width: 88px; height: 88px; }
   /* 敌人部位表：横表（参照站那 8 列的「部位数据」），窄列用等宽数字，行高压住免得一屏塞不下。
      表头与参照站一致：斜纹底 + 琥珀字；隔行底色，行线用浅描边。 */
   .parts { border: 1px solid var(--border); }
@@ -378,6 +386,70 @@
   /* 使用策略：参考站也是有序列表。 */
   .tips { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--text-dim); }
   .tips li { margin-top: 4px; }
+
+  /* —— 参考站统一的图片模块 ——
+     两个参考站的共同视觉语言是「黑色铸铁面板 + 黄铜顶边 + 方角硬线」；
+     所有带图条目都使用同一套容器，图片失败时由模板的空态文案接管，不能留下破图图标。 */
+  .media, .hero, .hero__img, .thumb, .icon, .item__head .media,
+  .side-sum__img, .part-img {
+    background: var(--panel-2);
+    border: 1px solid var(--line-2);
+  }
+  .media img, .hero img, .hero__img img, .thumb img, .icon,
+  .side-sum__img, .part-img { object-fit: contain; }
+  .hero img { width: 100%; height: 100%; object-fit: cover; }
+  .media--wide, .media--hero, .media--enemy { border-top: 2px solid var(--brass); }
+  .thumb { flex: 0 0 auto; width: 92px; height: 64px; padding: 5px; }
+  .thumb img { width: 100%; height: 100%; }
+  .image-missing { display: grid; place-items: center; min-height: 64px; color: var(--text-mute); background: var(--panel-2); border: 1px solid var(--line-2); font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; }
+  @media (max-width: 620px) {
+    .war-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .war-results { grid-column: 1 / -1; }
+    .card { padding: 14px 12px 10px; }
+    .card__title { font-size: 24px; }
+    .kpis { gap: 6px; }
+    .kpi { padding: 8px 9px 7px; }
+    .kpi__value { font-size: 25px; }
+    .item__head { align-items: flex-start; }
+    .media--wide { width: 96px; height: 60px; }
+    .media--hero { width: 132px; height: 82px; }
+    .media--enemy { width: 96px; height: 96px; }
+    .wiki { grid-template-columns: 1fr; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  /* 阵营徽标在任何位置都沿用各自颜色；优先于头栏和星球卡的通用 fill。 */
+  svg.emblem--humans { fill: var(--c-humans); }
+  svg.emblem--terminid { fill: var(--c-terminids); }
+  svg.emblem--automaton { fill: var(--c-automaton); }
+  svg.emblem--illuminate { fill: var(--c-illuminate); }
+  /* DSS follows the reference site's black HUD and striped section dividers. */
+  .dss-hud { background:#000; border:1px solid #262626; margin-top:14px; }
+  .dss-top { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:#0f0f0f; }
+  .dss-top h2 { margin:0; border-left:4px solid #ffe600; padding-left:10px; font-size:19px; }
+  .dss-top > span { color:#ffe600; letter-spacing:.16em; }
+  .dss-div, .dss-sec { background:repeating-linear-gradient(45deg,#1a1500 0 6px,transparent 6px 12px); }
+  .dss-div { height:6px; border-block:1px solid #3a3300; }
+  .dss-grid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:16px; padding:16px; }
+  .dss-sec { margin:0 0 10px; padding:7px 10px; color:#ffe600; border:1px solid #3a3300; font-size:15px; }
+  .dss-action { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:10px; align-items:center; background:#0f0f0f; border:1px solid #262626; padding:14px 10px; margin-top:8px; font-size:14px; }
+  .dss-icon { width:24px; height:24px; fill:#ffe600; }
+  .dss-summary { border:1px solid #262626; background:#0f0f0f; }
+  .dss-hero { display:grid; place-items:center; height:160px; background:radial-gradient(ellipse at center,#1c2635,#05070c 75%); }
+  .dss-station { width:112px; height:112px; fill:#ffe600; }
+  .dss-detail { border-top:1px solid #262626; padding:14px; }
+  .dss-detail h3 { margin:0 0 8px; font-size:13px; color:#9a9a9a; }
+  .dss-detail strong { font-size:17px; color:#ffe600; }
+  .planet-overview { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); border-bottom:1px solid var(--border); }
+  .planet-detail-card .pc-landmark { height:auto; min-height:210px; border:0; }
+  .planet-detail-card .pc-landmark img { position:absolute; inset:0; }
+  .planet-situation { padding:16px 8px; background:#0f0f0f; }
+  .planet-detail-card .pc-name { font-size:28px; white-space:normal; }
+  .planet-detail { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; padding:16px; }
+  .planet-detail .pd-section { padding:0; border:0; min-width:0; }
+  .planet-detail .pd-title { padding-bottom:8px; margin-bottom:6px; border-bottom:1px solid var(--border); }
+  .planet-detail .pd-trait { border:1px dashed var(--border); background:rgba(255,255,255,.03); }
+
+  @media(max-width:600px) { .dss-grid, .planet-overview, .planet-detail { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>

@@ -15,11 +15,33 @@ import (
 // testPNG 是占位图片字节：发送路径不做图片解码，内容只用于让请求有体积。
 var testPNG = []byte{0x89, 0x50, 0x4E, 0x47}
 
-// newPhotoTestBot 造一个能分别控制文本延迟与图片延迟的测试机器人。
-func newPhotoTestBot(t *testing.T, msgDelay, photoDelay time.Duration) (*Bot, *fakeTelegram) {
+func TestTemporaryKeyboardUsesConfiguredDelay(t *testing.T) {
+	b, fake := newPhotoTestBot(t, 20*time.Millisecond)
+	if err := b.SendTemporaryTextWithKeyboard(-100, "选择星球", planetMarkup("星球-"), 0); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for fake.count("deleteMessage") == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if fake.count("deleteMessage") != 1 {
+		t.Fatal("temporary keyboard was not deleted")
+	}
+}
+
+func TestPhotoPreparationStartsImmediatelyAndStops(t *testing.T) {
+	b, fake := newPhotoTestBot(t, 0)
+	stop := b.StartPhotoPreparation(-100)
+	if fake.count("sendChatAction") != 1 {
+		t.Error("preparation must signal before work starts")
+	}
+	stop()
+}
+
+// newPhotoTestBot 创建测试机器人。
+func newPhotoTestBot(t *testing.T, msgDelay time.Duration) (*Bot, *fakeTelegram) {
 	t.Helper()
 	b, fake := newTestBot(t, msgDelay, 0, 0)
-	b.photoDelay = photoDelay
 	return b, fake
 }
 
@@ -45,10 +67,10 @@ func decodeMarkup(t *testing.T, form url.Values) tgbotapi.InlineKeyboardMarkup {
 	return markup
 }
 
-// TestSendPhotoKeepsPhotoWhenDelayZero 校验 photo_del_delay=0 时图片发出去就不管了。
-// 用户决策：群里看图需要时间，默认不删图片，只有显式配置了延迟才跟着文本一起清理。
+// TestSendPhotoKeepsPhotoWhenDelayZero 验证图片保留。
+// 图片始终保留。
 func TestSendPhotoKeepsPhotoWhenDelayZero(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	if err := b.SendPhoto(-100, testPNG, 42); err != nil {
 		t.Fatalf("发送图片失败：%v", err)
 	}
@@ -58,25 +80,13 @@ func TestSendPhotoKeepsPhotoWhenDelayZero(t *testing.T) {
 	// 等一段明显长于删除触发窗口的时间，确认确实没有注册删除。
 	time.Sleep(200 * time.Millisecond)
 	if got := fake.count("deleteMessage"); got != 0 {
-		t.Fatalf("photo_del_delay=0 时图片不应被删除，实际删除 %d 次", got)
-	}
-}
-
-// TestSendPhotoDeletesWhenDelayPositive 校验 photo_del_delay>0 时图片按延迟删除。
-func TestSendPhotoDeletesWhenDelayPositive(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 10*time.Millisecond)
-	if err := b.SendPhoto(-100, testPNG, 0); err != nil {
-		t.Fatalf("发送图片失败：%v", err)
-	}
-	fake.waitForMethod(t, "deleteMessage")
-	if got := fake.forms("deleteMessage")[0].Get("message_id"); got != "888" {
-		t.Fatalf("应删除刚发出的图片消息（888），实际 message_id=%q", got)
+		t.Fatalf("图片不应被删除，实际删除 %d 次", got)
 	}
 }
 
 // TestSendChatActionCalledBeforePhoto 校验发图前先发 upload_photo 状态提示。
 func TestSendChatActionCalledBeforePhoto(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	if err := b.SendPhoto(-100, testPNG, 0); err != nil {
 		t.Fatalf("发送图片失败：%v", err)
 	}
@@ -95,7 +105,7 @@ func TestSendChatActionCalledBeforePhoto(t *testing.T) {
 // TestSendPhotoReplyToAndNoCaption 校验 replyTo 透传，且图片不带 caption / parse_mode
 // （卡片文案已经渲染进图片里，图片本身不该再挂文字）。
 func TestSendPhotoReplyToAndNoCaption(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	if err := b.SendPhoto(-100, testPNG, 42); err != nil {
 		t.Fatalf("发送图片失败：%v", err)
 	}
@@ -111,7 +121,7 @@ func TestSendPhotoReplyToAndNoCaption(t *testing.T) {
 	}
 
 	// replyTo 为 0 时不引用任何消息
-	b2, fake2 := newPhotoTestBot(t, 0, 0)
+	b2, fake2 := newPhotoTestBot(t, 0)
 	if err := b2.SendPhoto(-100, testPNG, 0); err != nil {
 		t.Fatalf("发送图片失败：%v", err)
 	}
@@ -122,7 +132,7 @@ func TestSendPhotoReplyToAndNoCaption(t *testing.T) {
 
 // TestSendPhotoFailureHasChineseContext 校验发图失败返回带中文上下文的错误，便于日志定位。
 func TestSendPhotoFailureHasChineseContext(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	fake.setPhotoCode(http.StatusBadRequest)
 	err := b.SendPhoto(-100, testPNG, 0)
 	if err == nil || !strings.Contains(err.Error(), "发送图片失败") {
@@ -133,7 +143,7 @@ func TestSendPhotoFailureHasChineseContext(t *testing.T) {
 // TestSendChatActionFailureOnlyLogs 校验状态提示失败只记日志、不上抛：
 // 状态提示只是体验优化，失败了也不该让整条指令跟着失败。
 func TestSendChatActionFailureOnlyLogs(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	fake.setActionCode(http.StatusBadRequest)
 	logs := captureLog(t)
 
@@ -145,9 +155,9 @@ func TestSendChatActionFailureOnlyLogs(t *testing.T) {
 }
 
 // TestSendTextWithKeyboardHasMarkup 校验文本按 MarkdownV2 发送、按钮挂在消息上，
-// 且按 msg_del_delay 延迟删除。
+// 且不受 /ping 删除延迟影响。
 func TestSendTextWithKeyboardHasMarkup(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 10*time.Millisecond, 0)
+	b, fake := newPhotoTestBot(t, 10*time.Millisecond)
 	if err := b.SendTextWithKeyboard(-100, "点下面的按钮选星球", planetMarkup("星球-")); err != nil {
 		t.Fatalf("发送带按钮的消息失败：%v", err)
 	}
@@ -166,13 +176,16 @@ func TestSendTextWithKeyboardHasMarkup(t *testing.T) {
 	if button.SwitchInlineQueryCurrentChat == nil || *button.SwitchInlineQueryCurrentChat != "星球-" {
 		t.Fatalf("按钮应带 switch_inline_query_current_chat=星球-，实际 %s", forms[0].Get("reply_markup"))
 	}
-	fake.waitForMethod(t, "deleteMessage")
+	time.Sleep(100 * time.Millisecond)
+	if fake.count("deleteMessage") != 0 {
+		t.Fatal("按钮消息不应删除")
+	}
 }
 
 // TestSendTextWithKeyboardMarkupOnlyOnFirstChunk 校验超长文本分片时按钮只挂在第一片上。
 // 多片重复挂按钮既冗余，前面几片被删掉后还会留下无法解释的按钮。
 func TestSendTextWithKeyboardMarkupOnlyOnFirstChunk(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	text := strings.Repeat("星球数据行\n", 1000) // 6000 个码元，必然分片
 	if err := b.SendTextWithKeyboard(-100, text, planetMarkup("星球-")); err != nil {
 		t.Fatalf("发送带按钮的长消息失败：%v", err)
@@ -210,7 +223,7 @@ func TestRegisterInlineDispatchesByPrefix(t *testing.T) {
 	defer resetQueues()
 
 	release := make(chan struct{})
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	t.Cleanup(func() { close(release) })
 
 	queries := make(chan string, 4)
@@ -243,7 +256,7 @@ func TestRegisterInlineDispatchesByPrefix(t *testing.T) {
 // TestRegisterInlineIgnoresEmptyPrefix 校验空前缀被忽略：
 // 空前缀会匹配所有人的全部行内查询，属于误配置。
 func TestRegisterInlineIgnoresEmptyPrefix(t *testing.T) {
-	b, _ := newPhotoTestBot(t, 0, 0)
+	b, _ := newPhotoTestBot(t, 0)
 	logs := captureLog(t)
 
 	b.RegisterInline("", func(tgbotapi.InlineQuery) error {
@@ -259,7 +272,7 @@ func TestRegisterInlineIgnoresEmptyPrefix(t *testing.T) {
 // TestAnswerInlineSendsQueryIDAndCacheTime 校验应答带上本次查询的 ID，并且显式要求不做客户端缓存。
 // cache_time 的 Telegram 默认值是 300 秒，战况常变，缺省会发旧结果，必须显式写 0。
 func TestAnswerInlineSendsQueryIDAndCacheTime(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	results := []interface{}{tgbotapi.NewInlineQueryResultArticle("p1", "天园", "/planet 天园六IV")}
 	if err := b.AnswerInline("query-1", results); err != nil {
 		t.Fatalf("应答行内查询失败：%v", err)
@@ -281,7 +294,7 @@ func TestAnswerInlineSendsQueryIDAndCacheTime(t *testing.T) {
 
 // TestAnswerInlineRejectsEmptyQueryID 校验缺少查询 ID 时直接报错，不发无意义的请求。
 func TestAnswerInlineRejectsEmptyQueryID(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	if err := b.AnswerInline("", nil); err == nil {
 		t.Fatal("缺少查询 ID 时应返回错误")
 	}
@@ -290,36 +303,11 @@ func TestAnswerInlineRejectsEmptyQueryID(t *testing.T) {
 	}
 }
 
-// TestSendPhotoDelayIndependentOfMsgDelay 校验图片的删除延迟只由 photo_del_delay 决定，
-// 与文本的 msg_del_delay 互不影响。两个方向都要断言：只测「图片延迟大于 0」时，
-// 把 photoDelay 误写成 msgDelay（或误用 deleteLater）的改动会悄悄溜过去。
-func TestSendPhotoDelayIndependentOfMsgDelay(t *testing.T) {
-	// 方向一：文本要删、图片不删（图片延迟设得足够长，用例结束前不会触发）
-	b, fake := newPhotoTestBot(t, 10*time.Millisecond, 10*time.Minute)
-	if err := b.SendPhoto(-100, testPNG, 0); err != nil {
-		t.Fatalf("发送图片失败：%v", err)
-	}
-	time.Sleep(200 * time.Millisecond)
-	if got := fake.count("deleteMessage"); got != 0 {
-		t.Fatalf("文本删除延迟不应作用到图片，实际删除 %d 次", got)
-	}
-
-	// 方向二：图片要删、文本不删
-	b2, fake2 := newPhotoTestBot(t, 10*time.Minute, 10*time.Millisecond)
-	if err := b2.SendPhoto(-100, testPNG, 0); err != nil {
-		t.Fatalf("发送图片失败：%v", err)
-	}
-	fake2.waitForMethod(t, "deleteMessage")
-	if got := fake2.forms("deleteMessage")[0].Get("message_id"); got != "888" {
-		t.Fatalf("应按图片延迟删除刚发出的图片消息（888），实际 message_id=%q", got)
-	}
-}
-
 // TestAnswerInlineSendsEmptyResultsArray 校验没有匹配结果时发的是空数组而不是 null。
 // Telegram 要求 results 是 JSON 数组，nil 切片会被序列化成 "null"，整条请求可能被拒收；
 // 空结果又没有 queryID 缺失那种提前返回，必须单独钉住。
 func TestAnswerInlineSendsEmptyResultsArray(t *testing.T) {
-	b, fake := newPhotoTestBot(t, 0, 0)
+	b, fake := newPhotoTestBot(t, 0)
 	if err := b.AnswerInline("query-1", nil); err != nil {
 		t.Fatalf("应答行内查询失败：%v", err)
 	}

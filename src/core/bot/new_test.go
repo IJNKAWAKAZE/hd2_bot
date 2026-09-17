@@ -36,7 +36,7 @@ func TestNewRetriesTelegramConnection(t *testing.T) {
 	}, 3, time.Millisecond)
 	logs := captureLog(t)
 
-	b, err := New("TOKEN", 0, -100, time.Second, 2*time.Second)
+	b, err := New("TOKEN", 0, -100, time.Second)
 	if err != nil {
 		t.Fatalf("重试后应建连成功，实际报错：%v", err)
 	}
@@ -45,9 +45,6 @@ func TestNewRetriesTelegramConnection(t *testing.T) {
 	}
 	if b.GroupID() != -100 {
 		t.Fatalf("groupID 应透传，实际 %d", b.GroupID())
-	}
-	if b.photoDelay != 2*time.Second {
-		t.Fatalf("photoDelay 应透传，实际 %s", b.photoDelay)
 	}
 	if !strings.Contains(logs.String(), "连接 Telegram 失败（第 1 次）") {
 		t.Fatalf("建连失败应记日志便于排查：\n%s", logs.String())
@@ -62,7 +59,7 @@ func TestNewFailsAfterAttempts(t *testing.T) {
 		return nil, errors.New("EOF")
 	}, 3, time.Millisecond)
 
-	_, err := New("TOKEN", 0, -100, 0, 0)
+	_, err := New("TOKEN", 0, -100, 0)
 	if err == nil {
 		t.Fatal("建连始终失败时应返回错误")
 	}

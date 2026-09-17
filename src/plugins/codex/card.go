@@ -30,7 +30,7 @@ const (
 // 卡片上不再写「匹配到几件」这类统计（用户 2026-09-17：精确匹配下那是噪音）。
 const searchLimit = 8
 
-// maxWarbondItems 是单本军需簿明细最多列几件装备（实测单本最多 20 余件，留出余量）。
+// maxWarbondItems 是单本债券明细最多列几件装备（实测单本最多 20 余件，留出余量）。
 const maxWarbondItems = 40
 
 // EquipmentSpec 描述一条装备查询指令的展示口径。
@@ -98,7 +98,7 @@ type EquipmentCard struct {
 	Notes  []string // 卡片底部的口径说明
 }
 
-// WarbondsCard 是 warbonds.tmpl 的视图模型：要么是全部军需簿的名单，要么是某一本的明细。
+// WarbondsCard 是 warbonds.tmpl 的视图模型：要么是全部债券的名单，要么是某一本的明细。
 type WarbondsCard struct {
 	render.Meta
 	Intro  string
@@ -108,7 +108,7 @@ type WarbondsCard struct {
 	Notes  []string
 }
 
-// WarbondRow 是名单里的一本军需簿。
+// WarbondRow 是名单里的一本债券。
 type WarbondRow struct {
 	Name    string
 	English string
@@ -118,7 +118,7 @@ type WarbondRow struct {
 	Items   string
 }
 
-// WarbondDetail 是一本军需簿的明细。
+// WarbondDetail 是一本债券的明细。
 type WarbondDetail struct {
 	Name    string
 	English string
@@ -448,7 +448,7 @@ var summonArrows = map[string]ArrowStep{
 	"right": {Asset: "arrow.right", Glyph: "→"},
 }
 
-// acquisitionText 拼获取方式：军需簿要把书名、页码与勋章数写清楚，征用点要写清价格与等级要求。
+// acquisitionText 拼获取方式：债券要把书名、页码与勋章数写清楚，征用点要写清价格与等级要求。
 func acquisitionText(catalog *arsenal.Catalog, item arsenal.Item) string {
 	acq := item.Acq
 	switch acq.Kind {
@@ -461,7 +461,7 @@ func acquisitionText(catalog *arsenal.Catalog, item arsenal.Item) string {
 		}
 		parts := make([]string, 0, 3)
 		if name != "" {
-			parts = append(parts, "军需簿「"+name+"」")
+			parts = append(parts, "债券「"+name+"」")
 		}
 		if acq.Page > 0 {
 			parts = append(parts, fmt.Sprintf("第 %d 页", acq.Page))
@@ -492,14 +492,14 @@ func dataTimeText(t time.Time) string {
 	return t.Format("2006-01-02 15:04")
 }
 
-// ---- 军需簿卡片 ----
+// ---- 债券卡片 ----
 
-// BuildWarbondsCard 组军需簿卡片：没写关键字时列全部名单，写了关键字且命中时给明细。
-// books 是全部军需簿（按目录顺序），detail 为 nil 时卡片只出名单。
+// BuildWarbondsCard 组债券卡片：没写关键字时列全部名单，写了关键字且命中时给明细。
+// books 是全部债券（按目录顺序），detail 为 nil 时卡片只出名单。
 func BuildWarbondsCard(books []arsenal.Warbond, detail *WarbondDetail, keyword string, dataTime time.Time) WarbondsCard {
 	card := WarbondsCard{
 		Meta: render.Meta{
-			Title:    "军需簿",
+			Title:    "债券",
 			Subtitle: "债券与解锁进度",
 			DataTime: dataTimeText(dataTime),
 			Emblem:   "emblem.major_order",
@@ -511,13 +511,12 @@ func BuildWarbondsCard(books []arsenal.Warbond, detail *WarbondDetail, keyword s
 		},
 	}
 	if detail != nil {
-		card.Intro = fmt.Sprintf("关键字「%s」命中：%s", keyword, detail.Name)
 		return card
 	}
 	if strings.TrimSpace(keyword) == "" {
-		card.Intro = "全部军需簿，按目录顺序排列；带上关键字可以看某一本里的装备。"
+		card.Intro = "全部债券，按目录顺序排列。"
 	} else {
-		card.Intro = fmt.Sprintf("没有找到匹配「%s」的军需簿，这里是全部名单。", keyword)
+		card.Intro = "没有找到对应债券，这里是全部名单。"
 	}
 	card.Books = make([]WarbondRow, 0, len(books))
 	for _, book := range books {
@@ -531,7 +530,7 @@ func BuildWarbondsCard(books []arsenal.Warbond, detail *WarbondDetail, keyword s
 		})
 	}
 	if len(card.Books) == 0 {
-		card.Empty = "目录里没有军需簿数据。"
+		card.Empty = "目录里没有债券数据。"
 	}
 	return card
 }
@@ -544,7 +543,7 @@ func creditsText(credits int) string {
 	return plugutil.FormatInt(int64(credits))
 }
 
-// BuildWarbondDetail 把一本军需簿转成明细；items 超出 maxWarbondItems 时截断并给出说明。
+// BuildWarbondDetail 把一本债券转成明细；items 超出 maxWarbondItems 时截断并给出说明。
 func BuildWarbondDetail(book arsenal.Warbond, items []arsenal.Item, catalog *arsenal.Catalog) *WarbondDetail {
 	detail := &WarbondDetail{
 		Name:    plugutil.DefaultText(book.NameZh, book.NameEn),
@@ -572,36 +571,15 @@ func BuildWarbondDetail(book arsenal.Warbond, items []arsenal.Item, catalog *ars
 	return detail
 }
 
-// FindWarbond 按关键字找一本军需簿：先精确匹配（中文名/英文名/id，忽略大小写），
-// 再前缀、再包含；命中多条时返回第一条并说明不确定（由调用方决定文案）。
+// FindWarbond 只按债券中文名、英文名或 id 精确匹配。
 func FindWarbond(catalog *arsenal.Catalog, keyword string) (arsenal.Warbond, bool) {
-	books := catalog.Warbonds()
-	if len(books) == 0 {
-		return arsenal.Warbond{}, false
-	}
-	key := strings.ToLower(strings.TrimSpace(keyword))
+	key := strings.TrimSpace(keyword)
 	if key == "" {
 		return arsenal.Warbond{}, false
 	}
-	for _, match := range []func(arsenal.Warbond) bool{
-		func(b arsenal.Warbond) bool {
-			return strings.EqualFold(strings.TrimSpace(b.NameZh), keyword) ||
-				strings.EqualFold(strings.TrimSpace(b.NameEn), keyword) ||
-				strings.EqualFold(strings.TrimSpace(b.ID), keyword)
-		},
-		func(b arsenal.Warbond) bool {
-			return strings.HasPrefix(strings.ToLower(strings.TrimSpace(b.NameZh)), key) ||
-				strings.HasPrefix(strings.ToLower(strings.TrimSpace(b.NameEn)), key)
-		},
-		func(b arsenal.Warbond) bool {
-			return strings.Contains(strings.ToLower(strings.TrimSpace(b.NameZh)), key) ||
-				strings.Contains(strings.ToLower(strings.TrimSpace(b.NameEn)), key)
-		},
-	} {
-		for _, book := range books {
-			if match(book) {
-				return book, true
-			}
+	for _, book := range catalog.Warbonds() {
+		if strings.EqualFold(strings.TrimSpace(book.NameZh), key) || strings.EqualFold(strings.TrimSpace(book.NameEn), key) || strings.EqualFold(strings.TrimSpace(book.ID), key) {
+			return book, true
 		}
 	}
 	return arsenal.Warbond{}, false
@@ -622,7 +600,7 @@ func BuildEnemyCard(result bestiary.Result, keyword string, images EnemyImages, 
 			Title:    "敌人图鉴",
 			Subtitle: "阵营 · 体型 · 血量 · 部位",
 			DataTime: dataTimeText(dataTime),
-			Emblem:   "emblem.terminids",
+			Emblem:   "",
 		},
 		// 数据来源不再写进卡片（用户 2026-09-17 要求），只留这条「怎么读」的口径说明。
 		Notes: []string{
@@ -637,6 +615,14 @@ func BuildEnemyCard(result bestiary.Result, keyword string, images EnemyImages, 
 	}
 
 	enemy := result.Enemies[0]
+	switch enemy.Faction {
+	case bestiary.FactionAutomaton:
+		card.Emblem = "emblem.automaton"
+	case bestiary.FactionTerminid:
+		card.Emblem = "emblem.terminids"
+	case bestiary.FactionIlluminate:
+		card.Emblem = "emblem.illuminate"
+	}
 	if !isExactEnemyName(enemy, trimmed) {
 		card.Intro = fmt.Sprintf("「%s」不是完整名字，这里显示最接近的「%s」。", trimmed, plugutil.DefaultText(enemy.NameZh, enemy.Title))
 	}
@@ -844,18 +830,19 @@ type DetailSection struct {
 // 参考站点的详情页把「武器信息 / 战略配备信息」放在右侧栏，这里按用户 2026-09-17 的要求
 // 并进主栏：整张卡只有一列，一张图就装得下。
 type EquipmentDetail struct {
-	Name      string
-	English   string
-	Model     string
-	Tags      []string // 类别与武器类型这类标签
-	Image     string   // data URI；没有图时为空串
-	Acquire   string
-	Arrows    []ArrowStep     // 召唤指令箭头（图标 + 文本符号）；不是战备时为 nil
-	SideTitle string          // 右侧栏标题（武器信息 / 战备信息…）；侧栏没内容时为空串
-	Side      []Field         // 右侧栏的关键数值
-	Sections  []DetailSection // 数值小节，顺序即卡片上的顺序
-	Attacks   []AttackBlock   // 攻击部件；没有可展示的数值时为 nil
-	Wiki      *WikiBlock      // 内置社区维基的详细属性；没有对应条目时为 nil
+	CompactImage bool // 战备使用紧凑图标，避免按武器外观大图放大。
+	Name         string
+	English      string
+	Model        string
+	Tags         []string // 类别与武器类型这类标签
+	Image        string   // data URI；没有图时为空串
+	Acquire      string
+	Arrows       []ArrowStep     // 召唤指令箭头（图标 + 文本符号）；不是战备时为 nil
+	SideTitle    string          // 右侧栏标题（武器信息 / 战备信息…）；侧栏没内容时为空串
+	Side         []Field         // 右侧栏的关键数值
+	Sections     []DetailSection // 数值小节，顺序即卡片上的顺序
+	Attacks      []AttackBlock   // 攻击部件；没有可展示的数值时为 nil
+	Wiki         *WikiBlock      // 内置社区维基的详细属性；没有对应条目时为 nil
 }
 
 // WikiBlock 是内置社区维基（见 src/atlas）里的详细资料：缺哪一段就不渲染哪一段。
@@ -879,17 +866,18 @@ type WikiAttack struct {
 	Cells []Field
 }
 
-// BuildEquipmentDetail 把一件装备排成详情卡。catalog 只用来把军需簿 id 翻成书名（可以传 nil），
+// BuildEquipmentDetail 把一件装备排成详情卡。catalog 只用来把债券 id 翻成书名（可以传 nil），
 // image 是这件装备的图（data URI），没有图时传空串。
 func BuildEquipmentDetail(item arsenal.Item, catalog *arsenal.Catalog, image string) *EquipmentDetail {
 	detail := &EquipmentDetail{
-		Name:    plugutil.DefaultText(item.NameZh, item.NameEn),
-		English: strings.TrimSpace(item.NameEn),
-		Model:   strings.TrimSpace(item.Model),
-		Tags:    detailTags(item),
-		Image:   image,
-		Acquire: acquisitionText(catalog, item),
-		Arrows:  codeArrows(item.Deploy),
+		CompactImage: item.Kind == arsenal.KindStratagem,
+		Name:         plugutil.DefaultText(item.NameZh, item.NameEn),
+		English:      strings.TrimSpace(item.NameEn),
+		Model:        strings.TrimSpace(item.Model),
+		Tags:         detailTags(item),
+		Image:        image,
+		Acquire:      acquisitionText(catalog, item),
+		Arrows:       codeArrows(item.Deploy),
 	}
 	if detail.Name == detail.English {
 		// 中文名缺失时上面会退回英文名，这里不再重复显示一遍。

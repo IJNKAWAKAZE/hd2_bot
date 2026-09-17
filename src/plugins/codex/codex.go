@@ -1,5 +1,5 @@
 // Package codex 提供图鉴类查询：/gun、/strat、/armor、/grenade、/warbonds、/enemy，
-// 以及六个行内查询前缀（武器- / 战备- / 护甲- / 手雷- / 军需簿- / 敌人-；星球- 仍由 planets 插件负责）。
+// 以及六个行内查询前缀（武器- / 战备- / 护甲- / 手雷- / 债券- / 敌人-；星球- 仍由 planets 插件负责）。
 //
 // 输出形态：六条指令不带关键字时发一条带行内搜索按钮的提示（与 /planet 一个套路，用户不必自己记名字），
 // 带上关键字才查。查询本身是「按名字精确查一件——图鉴卡片上只有这一件的详情，
@@ -63,7 +63,8 @@ type Sender interface {
 	// SendPhoto 发送一张图片卡片。
 	SendPhoto(chatID int64, png []byte, replyTo int64) error
 	// SendTextWithKeyboard 发送带内联键盘的文本（不带关键字时发的那条行内搜索提示）。
-	SendTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error
+	SendTemporaryTextWithKeyboard(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup, delay time.Duration) error
+	DeleteMessage(chatID, messageID int64) error
 	// IsTargetChat 判断会话是否是配置里指定的群。
 	IsTargetChat(chatID int64) bool
 }
@@ -147,7 +148,7 @@ func (h *handler) equipment(update tgbotapi.Update, spec EquipmentSpec) error {
 	keyword := plugutil.CommandArg(msg.Text)
 	if keyword == "" {
 		// 不带关键字时不再列目录：给一个行内搜索按钮，用户在输入框里挑（用户 2026-09-17 的要求）。
-		return h.sendInlineHint(chatID, spec.Command)
+		return h.sendInlineHint(chatID, msg.MessageID, spec.Command)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), plugutil.Timeout)
@@ -184,7 +185,7 @@ func (h *handler) warbonds(update tgbotapi.Update) error {
 	keyword := plugutil.CommandArg(msg.Text)
 	if keyword == "" {
 		// 不带关键字时列全部 24 本已经没用了：改成行内搜索按钮，名单在候选里也一样看得见。
-		return h.sendInlineHint(chatID, "warbonds")
+		return h.sendInlineHint(chatID, msg.MessageID, "warbonds")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), plugutil.Timeout)
@@ -225,7 +226,7 @@ func (h *handler) enemy(update tgbotapi.Update) error {
 	keyword := plugutil.CommandArg(msg.Text)
 	if keyword == "" {
 		// 80 只一次列不完（要分 3 页），不带关键字时改成行内搜索按钮更省事。
-		return h.sendInlineHint(chatID, "enemy")
+		return h.sendInlineHint(chatID, msg.MessageID, "enemy")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), plugutil.Timeout)
@@ -267,7 +268,7 @@ func (h *handler) enemy(update tgbotapi.Update) error {
 // 接着打关键字就能挑，选中候选会回填成对应指令（与 planets 插件的 /planet 一个套路）。
 //
 // 前缀从 InlineSpecs 里按指令名查：查不到只记一条日志、不报错——按钮只是入口，指令本身仍然可用。
-func (h *handler) sendInlineHint(chatID int64, command string) error {
+func (h *handler) sendInlineHint(chatID, commandID int64, command string) error {
 	spec, ok := inlineSpecForCommand(command)
 	if !ok {
 		log.Printf("/%s 没有登记行内前缀，跳过搜索按钮 chat=%d", command, chatID)
@@ -275,8 +276,14 @@ func (h *handler) sendInlineHint(chatID int64, command string) error {
 	}
 	// 文案是常量式的短句、不经过 bot.Escape，所以不能含 MarkdownV2 保留字符（有用例盯着）。
 	text := "点下面的按钮搜索" + spec.Label + "（支持中文名或英文名）"
-	return h.sender.SendTextWithKeyboard(chatID, text,
-		plugutil.InlineSearchMarkup("选择"+spec.Label, spec.Prefix))
+	if err := h.sender.SendTemporaryTextWithKeyboard(chatID, text,
+		plugutil.InlineSearchMarkup("选择"+spec.Label, spec.Prefix), 0); err != nil {
+		return err
+	}
+	if err := h.sender.DeleteMessage(chatID, commandID); err != nil {
+		log.Printf("删除查询指令失败 chat=%d err=%v", chatID, err)
+	}
+	return nil
 }
 
 // render 调用渲染引擎；未启用渲染（renderer 为 nil）时返回错误，让调用方走文本回退。

@@ -22,6 +22,25 @@ import (
 )
 
 // TestCardsSmokeWithRealBrowser 渲染六张图鉴卡片：五类装备各一张 + 敌人一张。
+func TestAutomatonCardSmokeWithRealBrowser(t *testing.T) {
+	if os.Getenv("HD2_RENDER_SMOKE") != "1" {
+		t.Skip("未开启 HD2_RENDER_SMOKE")
+	}
+	engine, err := render.New(render.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer engine.Close()
+	card := BuildEnemyCard(bestiary.Result{Enemies: []bestiary.Enemy{{Title: "Annihilator Tank", NameZh: "湮灭坦克", Faction: bestiary.FactionAutomaton, Size: 2}}}, "湮灭坦克", EnemyImages{}, nil, time.Now())
+	png, err := engine.Render(context.Background(), render.Card{Name: enemyCardName, Data: card})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join("..", "..", "..", "tmp", "screenshots", "hd2_automaton_card.png"), png, 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestCardsSmokeWithRealBrowser(t *testing.T) {
 	if os.Getenv("HD2_RENDER_SMOKE") != "1" {
 		t.Skip("未开启 HD2_RENDER_SMOKE")
