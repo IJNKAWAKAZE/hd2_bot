@@ -1,0 +1,78 @@
+{{- /* planet 是 /planet 的单星球卡片，版式对齐社区站点 HD2 真理部星图页的星球卡：
+       阵营色卡框（.f-* 切 --fc/--fcd）＋ 顶栏（派系徽记 · 派系名 · 在线士兵）＋ 群系实景图 ＋
+       战役状态与星球名 ＋ 进度条与保卫倒计时，下面接「星球情报 / 环境危害 / 星球事件」三个小节。
+       视图模型是 Go 侧的 PlanetCard：缺省值已经填成「—」「未知」「暂无环境危害」，
+       配色 class 与素材逻辑名也算好了，模板不做任何计算。
+       环境危害逐条来自 EnvItems（上游的 None 占位在 Go 侧已剔除）：有真实危害时先列名字 chips、
+       再逐条展开说明；没有时只写一句「暂无环境危害」。EnvNote 为空（翻译正常）时那句说明不渲染。
+       群系实景图没有素材逻辑名时用暗底斜纹占位（.pc-nobiome），卡片其余部分照常——
+       配错一张图比没有图更糟。 */ -}}
+{{define "body"}}
+<article class="planet-card {{.CardClass}}">
+  <div class="pc-top">
+    {{if .Emblem}}{{icon .Emblem "pc-ficon"}}{{end}}
+    <span class="pc-fname">{{.Faction}}</span>
+    <div class="pc-res">{{icon "ui.reinforce" "pc-reinf"}}<span class="num">{{.PlayerCount}}</span> 士兵</div>
+  </div>
+
+  {{if .BiomeAsset}}
+  <div class="pc-landmark"><img src="{{asset .BiomeAsset}}" alt=""></div>
+  {{else}}
+  <div class="pc-landmark pc-nobiome"></div>
+  {{end}}
+
+  <div class="pc-head">
+    <span class="pc-type">{{.Status}}</span>
+    <span class="pc-name{{if .Defense}} def{{end}}">{{.NameChinese}}</span>
+    {{if .NameEnglish}}<span class="pc-sub">{{.NameEnglish}}</span>{{end}}
+  </div>
+
+  {{if .BarLabel}}
+  <div class="pc-progress">
+    <div class="pc-bar"><span class="cursor"></span><div class="fill" style="width: {{.BarPercent}}%"></div><div class="slot"></div></div>
+    <div class="pc-stats">
+      <span class="k">{{.BarLabel}} <span class="v">{{.BarText}}</span></span>
+      <span class="k">每秒回复 <span class="v">{{.Regen}}</span></span>
+    </div>
+  </div>
+  {{end}}
+
+  {{if .Timer}}
+  <div class="pc-timer">
+    <span class="k">保卫剩余</span>
+    <span class="timer">{{.Timer}}</span>
+  </div>
+  {{end}}
+
+  <div class="pd-section">
+    <div class="pd-title">星球情报<span class="pd-cn">PLANET INTEL</span></div>
+    <div class="pd-row"><span>生物群系</span><strong class="pd-v">{{.Biome}}</strong></div>
+    {{if .BiomeDesc}}<div class="pd-row"><span>群系说明</span><strong class="pd-v">{{.BiomeDesc}}</strong></div>{{end}}
+    <div class="pd-row"><span>当前控制方</span><strong class="pd-v {{.OwnerClass}}">{{.Owner}}</strong></div>
+    <div class="pd-row"><span>初始控制方</span><strong class="pd-v">{{.InitialOwner}}</strong></div>
+    <div class="pd-row"><span>星球血量</span><strong class="pd-v">{{.HealthText}}</strong></div>
+    {{if .Attacking}}<div class="pd-row"><span>进攻目标</span><strong class="pd-v">编号 {{.Attacking}}</strong></div>{{end}}
+  </div>
+
+  <div class="pd-section">
+    <div class="pd-title">环境危害<span class="pd-cn">ENVIRONMENTAL HAZARDS</span></div>
+    {{if .EnvItems}}
+    <div class="pd-chips">{{range .EnvItems}}<span class="pd-chip pd-chip-neg">{{.Name}}</span>{{end}}</div>
+    {{range .EnvItems}}{{if .Description}}<div class="pd-trait"><b>{{.Name}}</b><p>{{.Description}}</p></div>{{end}}{{end}}
+    {{else}}
+    <div class="pd-empty">{{.Hazards}}</div>
+    {{end}}
+    {{if .EnvNote}}<div class="pd-empty">{{.EnvNote}}</div>{{end}}
+  </div>
+
+  {{if .Event}}
+  <div class="pd-section">
+    <div class="pd-title">星球事件<span class="pd-cn">PLANET EVENT</span></div>
+    <div class="pd-row"><span>进攻方</span><strong class="pd-v {{.Event.FactionClass}}">{{.Event.Faction}}</strong></div>
+    <div class="pd-row"><span>开始时间</span><strong class="pd-v">{{.Event.StartTime}}</strong></div>
+    <div class="pd-row"><span>结束时间</span><strong class="pd-v">{{.Event.EndTime}}</strong></div>
+    <div class="pd-row"><span>防守血量</span><strong class="pd-v">{{.Event.HealthText}}</strong></div>
+  </div>
+  {{end}}
+</article>
+{{end}}

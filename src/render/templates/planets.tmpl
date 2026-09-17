@@ -1,0 +1,68 @@
+{{- /* planets 是 /planets 的战线总览卡片：战线汇总 + 热点星球。
+       热点按用户 2026-09-17 的要求加回来（此前只留汇总数字），版式对齐社区站点 HD2 真理部的星球卡：
+       阵营色卡框（.f-* 切 --fc/--fcd）＋ 派系徽记与士兵数 ＋ 群系实景图 ＋ 战役类型与星球名 ＋ 进度条。
+       视图模型是 Go 侧的 PlanetsCard，所有数字、配色 class、素材逻辑名与倒计时文案都由 Go 侧给好，模板只排版。
+       通用 class 见 base.tmpl（.section/.kpis/.planet-card/.pc-*）。 */ -}}
+{{define "body"}}
+<section class="section">
+  <h2 class="section__title">战线汇总</h2>
+  <div class="kpis">
+    <div class="kpi">
+      <div class="kpi__value">{{.PlayerCount}}</div>
+      <div class="kpi__label">在线士兵</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__value">{{.Total}}</div>
+      <div class="kpi__label">星球总数</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__value">{{.Contested}}</div>
+      <div class="kpi__label">进攻中</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__value">{{.EventCount}}</div>
+      <div class="kpi__label">有事件</div>
+    </div>
+  </div>
+</section>
+
+{{if .Hotspots}}
+<section class="section">
+  <h2 class="section__title">热点星球</h2>
+  <div class="planet-grid">
+    {{range .Hotspots}}
+    <article class="planet-card {{.CardClass}}">
+      <div class="pc-top">
+        {{if .Emblem}}{{icon .Emblem "pc-ficon"}}{{end}}
+        <span class="pc-fname">{{.Faction}}</span>
+        <div class="pc-res">{{icon "ui.reinforce" "pc-reinf"}}<span class="num">{{.PlayerCount}}</span> 士兵</div>
+      </div>
+      {{if .BiomeAsset}}
+      <div class="pc-landmark"><img src="{{asset .BiomeAsset}}" alt=""></div>
+      {{else}}
+      <div class="pc-landmark pc-nobiome"></div>
+      {{end}}
+      <div class="pc-head">
+        <span class="pc-type">{{.Status}} ｜ 编号 {{.Index}} ｜ {{.Sector}}</span>
+        <span class="pc-name{{if .Defense}} def{{end}}">{{.NameChinese}}</span>
+        <span class="pc-sub">{{.NameEnglish}}</span>
+      </div>
+      <div class="pc-progress">
+        <div class="pc-bar"><span class="cursor"></span><div class="fill" style="width: {{.BarPercent}}%"></div><div class="slot"></div></div>
+        <div class="pc-stats">
+          <span class="k">{{.BarLabel}}</span>
+          <span class="v">{{.BarText}}</span>
+        </div>
+      </div>
+      {{if .Timer}}
+      <div class="pc-timer">
+        <span class="k">保卫剩余</span>
+        <span class="timer">{{.Timer}}</span>
+      </div>
+      {{end}}
+    </article>
+    {{end}}
+  </div>
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,31 @@
+{{- /* assignments 是 /assignments 的重要指令卡片：上游当前没有进行中的指令时出占位卡（不是错误）。
+       视图模型是 Go 侧的 orders.AssignmentsCard，字段都已格式化，模板只排版、不做计算。
+       通用 class 见 base.tmpl（.section/.kpis/.kpi/.row/.text/.muted/.empty 等）。 */ -}}
+{{define "body"}}
+{{if .Empty}}
+<section class="section">
+  <p class="empty">暂无重要指令。</p>
+  <div class="muted">上游当前没有进行中的重要指令（Major Order），这是正常状态。</div>
+</section>
+{{else}}
+<section class="section">
+  <h2 class="section__title">进行中</h2>
+  <div class="row"><span class="muted">重要指令条数</span><span class="strong mono">{{.Count}}</span></div>
+</section>
+
+{{range .Items}}
+<section class="section">
+  <h2 class="section__title">{{.Title}}</h2>
+  <p class="text">{{.Briefing}}</p>
+  <div class="row"><span class="muted">任务</span><span class="strong">{{.Tasks}}</span></div>
+  <div class="row"><span class="muted">奖励</span><span class="strong">{{.Reward}}</span></div>
+  <div class="row"><span class="muted">截止时间</span><span class="mono">{{.Expiration}}</span></div>
+  {{if .Progress}}<div class="row"><span class="muted">进度</span><span class="mono">{{.Progress}}</span></div>{{end}}
+</section>
+{{end}}
+
+<section class="section">
+  {{range .Notes}}<div class="muted">{{.}}</div>{{end}}
+</section>
+{{end}}
+{{end}}

@@ -1,0 +1,16 @@
+{{- /* smoke 是冒烟卡片：用最少的字段验证「模板 → HTML → 截图」整条链路是否正常。
+       排查问题时先看它：它能出图说明渲染环境没问题，问题在具体卡片的数据或模板。 */ -}}
+{{define "body"}}
+<section class="section">
+  <h2 class="section__title">渲染链路自检</h2>
+  {{if .Lines}}
+  <ul class="list">
+    {{- range .Lines}}
+    <li class="list__item">{{.}}</li>
+    {{- end}}
+  </ul>
+  {{else}}
+  <p class="empty">没有内容</p>
+  {{end}}
+</section>
+{{end}}

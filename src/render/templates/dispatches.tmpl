@@ -1,0 +1,24 @@
+{{- /* dispatches 是 /dispatches 的战役简报卡片：每张卡片展示最新 N 条（N 由指令参数决定）。
+       用户 2026-09-17 要求卡片上不再写「本次展示」那组统计（展示条数 / 上游简报总数 / 已截断条数）：
+       上游一共有多少条与群友无关；某条正文是否被截断仍由该条自己的说明标出。
+       视图模型是 Go 侧的 orders.DispatchesCard，正文已清理游戏内标记并按上限截断，模板只排版。 */ -}}
+{{define "body"}}
+{{if .Note}}<section class="section"><div class="muted">{{.Note}}</div></section>{{end}}
+
+{{if .TranslateNote}}<section class="section"><div class="muted">{{.TranslateNote}}</div></section>{{end}}
+
+{{if .Items}}
+{{range .Items}}
+<section class="section">
+  <h2 class="section__title">第 {{.Ordinal}} 条 ｜ {{.Published}}</h2>
+  <p class="text">{{.Message}}</p>
+  {{if .Truncated}}<div class="muted">正文过长，已截断显示。</div>{{end}}
+</section>
+{{end}}
+{{else}}
+<section class="section">
+  <p class="empty">暂无战役简报。</p>
+  <div class="muted">上游没有返回任何简报，稍后再试试。</div>
+</section>
+{{end}}
+{{end}}

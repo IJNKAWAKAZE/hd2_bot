@@ -1,0 +1,32 @@
+{{- /* war 是 /war 的银河战况卡片。视图模型（war.WarCard）里的字段都已经格式化、本地化好，
+       模板只负责排版；上游不可信的字段（war.now / war.ended / 命中率 / 复活数）刻意不展示，
+       客户端版本也不再上卡（用户 2026-09-17 要求删掉）。
+       卡片外壳（标题、数据时间、过期角标、页脚）由 base.tmpl 统一渲染，这里只定义 body 片段。 */ -}}
+{{define "body"}}
+<section class="section">
+  <div class="kpis">
+    <div class="kpi">
+      <div class="kpi__value">{{.PlayerCount}}</div>
+      <div class="kpi__label">在线士兵</div>
+    </div>
+    <div class="kpi">
+      <div class="kpi__value">{{.SuccessRate}}</div>
+      <div class="kpi__label">任务成功率</div>
+    </div>
+    {{/* 胜负两个数字同字号：原先「负」写在标签行里是小字，用户 2026-09-17 要求改齐 */}}
+    <div class="kpi">
+      <div class="kpi__value"><span class="tag tag--win">胜</span> {{.MissionsWon}}</div>
+      <div class="kpi__value"><span class="tag tag--loss">负</span> {{.MissionsLost}}</div>
+      <div class="kpi__label">任务胜负</div>
+    </div>
+  </div>
+</section>
+<section class="section">
+  <h2 class="section__title">派系击杀</h2>
+  <ul class="list">
+    <li class="list__item"><span class="grow faction--terminid">终结族</span><span class="mono">{{.TerminidKills}}</span></li>
+    <li class="list__item"><span class="grow faction--automaton">机器人</span><span class="mono">{{.AutomatonKills}}</span></li>
+    <li class="list__item"><span class="grow faction--illuminate">光能者</span><span class="mono">{{.IlluminateKills}}</span></li>
+  </ul>
+</section>
+{{end}}

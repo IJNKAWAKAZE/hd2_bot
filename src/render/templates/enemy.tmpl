@@ -1,0 +1,119 @@
+{{- /* enemy 是 /enemy 的敌人图鉴卡片：与装备图鉴一样是「按名字精确查一只」，
+       卡片上只有命中的那一只（列表形态只存在于行内查询的候选里）。
+       版式照着社区维基的敌人详情页（HD2_Wiki/enemy.html）：左主栏放外观 / 基础信息 / 部位数据，
+       右侧栏放总生命值、同阵营敌人与来源。阵营的配色 class 直接用在阵营那一格的数值上
+       （未收录的阵营退化成普通文字）。图与详细资料来自内置的社区维基数据（见 src/atlas），
+       匹配不上时那几段为空，卡片只画我们图鉴里的信息。 */ -}}
+{{define "body"}}
+{{if .Intro}}
+<section class="section">
+  <p class="text">{{.Intro}}</p>
+</section>
+{{end}}
+
+{{if .Empty}}
+<section class="section">
+  <p class="empty">{{.Empty}}</p>
+</section>
+{{else}}{{with .Enemy}}
+<div class="wiki">
+  <div class="wiki__main">
+    {{/* 名称块：中英文名 + 阵营 / 体型标签 + 一句话描述。 */}}
+    <section class="panel">
+      <div class="panel__body">
+        <div class="item__head">
+          <div class="item__text">
+            <div class="item__name">{{.Name}}</div>
+            {{if .English}}<div class="item__en mono">{{.English}}</div>{{end}}
+            {{if .Tags}}<div class="chips">{{range .Tags}}<span class="chip">{{.}}</span>{{end}}</div>{{end}}
+            {{if .Desc}}<div class="item__desc">{{.Desc}}</div>{{end}}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    {{if .Variants}}
+    <section class="panel">
+      <h2 class="panel__head">变体版本</h2>
+      <div class="panel__body"><div class="chips">{{range .Variants}}<span class="chip">{{.}}</span>{{end}}</div></div>
+    </section>
+    {{end}}
+
+    {{if .Image}}
+    <section class="panel">
+      <h2 class="panel__head">外观</h2>
+      <div class="panel__body"><div class="hero__img"><img src="{{dataimg .Image}}" alt=""></div></div>
+    </section>
+    {{end}}
+
+    {{if .Rows}}
+    <section class="panel">
+      <h2 class="panel__head">基础信息</h2>
+      <div class="panel__body">
+        <div class="kv">{{range .Rows}}<div class="kv__row"><span class="kv__k">{{.Label}}</span><span class="kv__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Parts}}
+    <section class="panel">
+      <h2 class="panel__head">部位数据 <small>共 {{len .Parts}} 个部位</small></h2>
+      <div class="panel__body">
+        <div class="parts">
+          <table>
+            <thead><tr><th>部位</th><th>图片</th><th>生命值</th><th>装甲</th><th>位置</th><th>耐久</th><th>对主体</th><th>特性</th></tr></thead>
+            <tbody>
+              {{range .Parts}}
+              <tr>
+                <td>{{.Name}}{{if .Count}} <span class="mono">×{{.Count}}</span>{{end}}</td>
+                <td>{{if .Image}}<img class="part-img" src="{{dataimg .Image}}" alt="">{{else}}—{{end}}</td>
+                <td class="mono">{{if .Health}}{{.Health}}{{else}}—{{end}}</td>
+                <td>{{if .Armor}}{{.Armor}}{{else}}—{{end}}</td>
+                <td>{{if .Location}}{{.Location}}{{else}}—{{end}}</td>
+                <td class="mono">{{if .Durable}}{{.Durable}}{{else}}—{{end}}</td>
+                <td class="mono">{{if .ToMain}}{{.ToMain}}{{else}}—{{end}}</td>
+                <td>{{if .Fatal}}<span class="parts__flag">致命</span>{{end}}{{if .Weak}}<span class="parts__flag">弱点</span>{{end}}</td>
+              </tr>
+              {{end}}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+    {{end}}
+  </div>
+
+  <aside class="wiki__side">
+    <section class="panel panel--side">
+      <h2 class="panel__head">总览</h2>
+      <div class="panel__body">
+        <div class="side-sum">
+          {{if .Image}}<img class="side-sum__img" src="{{dataimg .Image}}" alt="">{{end}}
+          <div>
+            <div class="item__name">{{.Name}}</div>
+            {{if .English}}<div class="item__en mono">{{.English}}</div>{{end}}
+          </div>
+          <div class="side-sum__hp"><b>{{.Health}}</b>总生命值</div>
+        </div>
+      </div>
+    </section>
+    {{if .Related}}
+    <section class="panel panel--side">
+      <h2 class="panel__head">同阵营敌人</h2>
+      <div class="panel__body">
+        <div class="navlist">{{range .Related}}<div class="navlist__row"><span>{{.Name}}</span><em>{{.Category}}</em></div>{{end}}</div>
+      </div>
+    </section>
+    {{end}}
+    {{if .Source}}
+    <section class="panel panel--side">
+      <h2 class="panel__head">来源</h2>
+      <div class="panel__body"><div class="source">{{.Source}}</div></div>
+    </section>
+    {{end}}
+  </aside>
+</div>
+{{end}}{{end}}
+
+{{range .Notes}}<section class="section"><div class="muted">{{.}}</div></section>{{end}}
+{{end}}

@@ -1,0 +1,29 @@
+{{- /* events 是 /events 的星球事件卡片：按结束时间升序展示最多 5 起（没有结束时间的排在最后并标「未知」）。
+       用户 2026-09-17 要求删掉「本次展示 / 进行中事件」两个统计、事件类型一行与底部说明：
+       群里只关心哪颗星球在打、谁是进攻方、还剩多久。
+       视图模型是 Go 侧的 station.EventsCard，字段都已格式化，模板只排版、不做计算。
+       通用 class 见 base.tmpl（.section/.row/.bar/.muted/.empty 等）。 */ -}}
+{{define "body"}}
+{{if .Items}}
+{{range .Items}}
+<section class="section">
+  <h2 class="section__title">{{.PlanetName}}</h2>
+  <div class="row"><span class="muted">进攻方</span><span class="strong {{.FactionClass}}">{{.Faction}}</span></div>
+  <div class="row"><span class="muted">星球编号</span><span class="mono">{{.PlanetIndex}}</span></div>
+  <div class="row"><span class="muted">开始时间</span><span class="mono">{{.StartTime}}</span></div>
+  <div class="row"><span class="muted">结束时间</span><span class="mono">{{.EndTime}}</span></div>
+  {{if .BarText}}
+  <div class="bar"><div class="bar__fill" style="width: {{.BarPercent}}%"></div></div>
+  <div class="muted">防守剩余 {{.BarText}}（{{.HealthText}}）</div>
+  {{end}}
+</section>
+{{end}}
+
+{{if .MoreText}}<section class="section"><div class="muted">{{.MoreText}}</div></section>{{end}}
+{{else}}
+<section class="section">
+  <p class="empty">暂无星球事件。</p>
+  <div class="muted">当前没有正在进行的防守战或其它星球事件。</div>
+</section>
+{{end}}
+{{end}}

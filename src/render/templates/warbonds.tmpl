@@ -1,0 +1,65 @@
+{{- /* warbonds 是 /warbonds 的军需簿卡片：不带关键字时是全部名单，带了关键字且命中时是某一本的明细。
+       两个分支互斥（Detail 为空才走名单），因此卡片上不会同时出现名单与明细。
+       视图模型是 Go 侧的 WarbondsCard，价格栏的「—」表示这本不单卖。 */ -}}
+{{define "body"}}
+<section class="section">
+  <p class="text">{{.Intro}}</p>
+</section>
+
+{{if .Detail}}
+<section class="section">
+  <h2 class="section__title">{{.Detail.Name}}</h2>
+  {{if .Detail.English}}<div class="muted mono">{{.Detail.English}}</div>{{end}}
+  <div class="row"><span class="muted">页数</span><span class="mono">{{.Detail.Pages}}</span></div>
+  <div class="row"><span class="muted">全部解锁勋章</span><span class="mono">{{.Detail.Medals}}</span></div>
+  <div class="row"><span class="muted">超级货币</span><span class="mono">{{.Detail.Credits}}</span></div>
+</section>
+
+<section class="section">
+  <h2 class="section__title">装备</h2>
+  {{if .Detail.Items}}
+  <ul class="list">
+    {{range .Detail.Items}}
+    <li class="list__item">
+      <span class="grow">
+        <span class="strong">{{.Name}}</span>
+        {{if .English}}<div class="muted mono">{{.English}}</div>{{end}}
+      </span>
+      <span class="tag">{{.Kind}}</span>
+      <span class="muted">{{.Acquire}}</span>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="empty">这本没有列出装备。</p>
+  {{end}}
+  {{if .Detail.More}}<div class="muted">{{.Detail.More}}</div>{{end}}
+</section>
+{{else if .Empty}}
+<section class="section">
+  <p class="empty">{{.Empty}}</p>
+</section>
+{{else}}
+<section class="section">
+  <h2 class="section__title">全部军需簿</h2>
+  <ul class="list">
+    {{range .Books}}
+    <li class="list__item">
+      <span class="grow">
+        <span class="strong">{{.Name}}</span>
+        {{if .English}}<div class="muted mono">{{.English}}</div>{{end}}
+      </span>
+      <span class="muted mono">{{.Pages}}</span>
+      <span class="muted mono">{{.Medals}}</span>
+      <span class="muted mono">{{.Credits}}</span>
+      <span class="tag">{{.Items}}</span>
+    </li>
+    {{end}}
+  </ul>
+</section>
+{{end}}
+
+<section class="section">
+  {{range .Notes}}<div class="muted">{{.}}</div>{{end}}
+</section>
+{{end}}

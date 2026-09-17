@@ -1,0 +1,129 @@
+{{- /* equipment 是 /gun、/strat、/armor、/grenade 共用的装备卡片。
+       图鉴查询是「按名字精确查一件」：卡片上只有命中的那一件的详情（Detail），
+       没命中时只出一句提示（Empty）——列表形态只存在于行内查询的候选里。
+       详情有两段来源：上游目录里的那几项（获取、召唤指令、护甲数值）与内置社区维基的详细属性（Wiki）。
+       版式照着社区维基详情页（HD2_Wiki/weapon.html）：左主栏放数值、右侧栏放类型与关键数值，
+       维基那段更细（弹体质量、穿透分角度、特殊效果），有它就替掉目录里重复的操作性/攻击段。 */ -}}
+{{define "body"}}
+{{if .Intro}}
+<section class="section">
+  <p class="text">{{.Intro}}</p>
+</section>
+{{end}}
+
+{{if .Empty}}
+<section class="section">
+  <p class="empty">{{.Empty}}</p>
+</section>
+{{else}}{{with .Detail}}
+<div class="wiki">
+  <div class="wiki__main">
+    {{/* 名称块：装备图占满一行（参照站详情页也是整块大图），名字与获取/解锁/说明排在图下面。 */}}
+    <section class="panel">
+      <div class="panel__body">
+        {{if .Image}}<div class="hero__img"><img src="{{dataimg .Image}}" alt=""></div>{{end}}
+        <div class="item__head">
+          <div class="item__text">
+            <div class="item__name">{{.Name}}{{if .Model}} <span class="model mono">{{.Model}}</span>{{end}}</div>
+            {{if .English}}<div class="item__en mono">{{.English}}</div>{{end}}
+            {{if .Tags}}<div class="chips">{{range .Tags}}<span class="chip">{{.}}</span>{{end}}</div>{{end}}
+            {{if .Acquire}}<div class="item__acq">获取：{{.Acquire}}</div>{{end}}
+            {{with .Wiki}}
+            {{if .Unlock}}<div class="item__acq">解锁：{{.Unlock}}</div>{{end}}
+            {{if .Desc}}<div class="item__desc">{{.Desc}}</div>{{end}}
+            {{end}}
+          </div>
+        </div>
+        {{if .Arrows}}
+        {{/* 召唤指令：箭头是游戏里的图形（内置 SVG），认不出的方向退回显示上游原文 */}}
+        <div class="summon"><span class="summon__k">召唤指令</span>{{range .Arrows}}<span class="summon__arrow">{{if .Asset}}{{icon .Asset}}{{else}}{{.Text}}{{end}}</span>{{end}}</div>
+        {{end}}
+      </div>
+    </section>
+
+    {{with .Wiki}}
+    {{if .Cells}}
+    <section class="panel">
+      <h2 class="panel__head">详细数据</h2>
+      <div class="panel__body">
+        <div class="tiles">{{range .Cells}}<div class="tile"><span class="tile__k">{{.Label}}</span><span class="tile__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Attacks}}
+    <section class="panel">
+      <h2 class="panel__head">攻击部件</h2>
+      <div class="panel__body">
+        {{range .Attacks}}
+        <div class="attack">
+          <div class="attack__head"><span>{{.Title}}</span>{{if .Tag}}<span class="chip">{{.Tag}}</span>{{end}}</div>
+          <div class="tiles tiles--inner">{{range .Cells}}<div class="tile"><span class="tile__k">{{.Label}}</span><span class="tile__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+        </div>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Variants}}
+    <section class="panel">
+      <h2 class="panel__head">变体版本</h2>
+      <div class="panel__body"><div class="chips">{{range .Variants}}<span class="chip">{{.}}</span>{{end}}</div></div>
+    </section>
+    {{end}}
+
+    {{if .Tips}}
+    <section class="panel">
+      <h2 class="panel__head">使用策略</h2>
+      <div class="panel__body"><ol class="tips">{{range .Tips}}<li>{{.}}</li>{{end}}</ol></div>
+    </section>
+    {{end}}
+    {{end}}
+
+    {{/* 上游目录里的那几段：护甲数值、召唤指令的部署信息（维基没有护甲数据），
+        以及维基没给攻击条目时兜底的攻击段。 */}}
+    {{range .Sections}}
+    <section class="panel">
+      <h2 class="panel__head">{{.Title}}</h2>
+      <div class="panel__body">
+        <div class="kv">{{range .Cells}}<div class="kv__row"><span class="kv__k">{{.Label}}</span><span class="kv__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+      </div>
+    </section>
+    {{end}}
+
+    {{if .Attacks}}
+    <section class="panel">
+      <h2 class="panel__head">攻击部件</h2>
+      <div class="panel__body">
+        {{range .Attacks}}
+        <div class="attack">
+          <div class="attack__head"><span>{{.Title}}</span>{{if .Tag}}<span class="chip">{{.Tag}}</span>{{end}}</div>
+          <div class="tiles tiles--inner">{{range .Cells}}<div class="tile"><span class="tile__k">{{.Label}}</span><span class="tile__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+        </div>
+        {{end}}
+      </div>
+    </section>
+    {{end}}
+  </div>
+
+  <aside class="wiki__side">
+    {{if .Side}}
+    <section class="panel panel--side">
+      <h2 class="panel__head">{{.SideTitle}}</h2>
+      <div class="panel__body">
+        <div class="kv">{{range .Side}}<div class="kv__row"><span class="kv__k">{{.Label}}</span><span class="kv__v {{.Class}}">{{.Value}}</span></div>{{end}}</div>
+      </div>
+    </section>
+    {{end}}
+    {{with .Wiki}}{{if .Traits}}
+    <section class="panel panel--side">
+      <h2 class="panel__head">特性</h2>
+      <div class="panel__body"><div class="chips">{{range .Traits}}<span class="chip">{{.}}</span>{{end}}</div></div>
+    </section>
+    {{end}}{{end}}
+  </aside>
+</div>
+{{end}}{{end}}
+
+{{range .Notes}}<section class="section"><div class="muted">{{.}}</div></section>{{end}}
+{{end}}

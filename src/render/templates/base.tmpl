@@ -1,0 +1,399 @@
+{{- /* base 是卡片公共外壳：卡片模板只需要定义 {{define "body"}}，头栏、数据时间、过期角标、页脚与样式都在这里。
+       卡片内容请复用下面的通用 class（.section/.kpis/.kpi/.list/.row/.tag/.bar/.hero/.thumb 等，
+       图鉴条目另有 .item/.media/.chips/.chip/.grid/.cell/.attack/.summon，
+       图鉴详情版式另有 .wiki/.panel/.tiles/.tile/.kv/.navlist（与参照站详情页一致）），不要再各写一套样式。
+       宽度由渲染引擎的视口宽度（render.width）决定，所以这里用 100% 而不是写死 px。
+
+       皮肤基线（2026-09-17 改版）：参考社区站点 HD2 真理部（jerry114514/HD2-Galatic_war-Map）的战术 HUD 风格，
+       调色板与它的 assets/css/tokens.css 对齐：纯黑底 + 琥珀强调 + 黄铜次强调 + 硬描边 + 45° 斜纹。
+       硬性规则：**零圆角 · 零阴影 · 零毛玻璃 · 强对比 · 高信息密度**——新样式一律不要再写 border-radius / box-shadow，
+       分层靠描边与底色深浅，不要靠投影。
+       设计依据：社区站点的 tokens.css（取色）与 HD2_Wiki 详情页的数据网格；
+       素材出处与许可见 assets/LICENSES.md。 */ -}}
+{{define "base"}}<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>{{.Title}}</title>
+<style>
+  /* 标题字体（ZZZ-thick）由 assets.go 的 fontFaceFunc 内联进二进制，页面无外链。 */
+  {{fontface}}
+  :root {
+    color-scheme: dark;
+    /* 底色：纯黑系，靠硬描边分层 */
+    --bg-deep: #060606;
+    --card-bg: #111111;
+    --panel: #0F0F0F;
+    --panel-2: #161616;
+    /* 强调色：琥珀（压力表/黄铜感）+ 黄铜次强调 */
+    --yellow: #FFB000;
+    --yellow-2: #FFC94A;
+    --brass: #C8862A;
+    /* 文本三档：正文 / 次要 / 弱化 */
+    --text: #F2F2F2;
+    --text-dim: #A8A8A8;
+    --text-mute: #6E6E6E;
+    /* 描边：常规 / 琥珀深 / 中性分隔 */
+    --border: #1F1F1F;
+    --border-h: #3A2A00;
+    --line-2: #2A2A2A;
+    /* 状态色（与参考站点的 DSS 模块一致） */
+    --ok: #1FA84A;
+    --warn: #FF4D2E;
+    --info: #5BA3D0;
+    /* 45° 斜纹：HUD 通用分隔底纹；警示斜纹留给「已过期」这类需要一眼看见的状态 */
+    --stripe: repeating-linear-gradient(45deg, rgba(255,176,0,.14) 0 6px, transparent 6px 12px);
+    --stripe-warn: repeating-linear-gradient(45deg, rgba(255,77,46,.22) 0 8px, transparent 8px 16px);
+    /* 阵营色：只在这里定义一次，卡片模板用 faction--* class 取用 */
+    --c-humans: #5BA3D0;
+    --c-terminids: #F5C518;
+    --c-automaton: #E74C3C;
+    --c-illuminate: #CF64F8;
+    /* 星球卡专用阵营色（与社区站点 HD2 真理部的 tokens.css 一致）：--fc 是主色、--fcd 是深色，
+       分别用于卡框/进度条与斜纹底。--c-* 那一组给文字用，两组并存不互相覆盖。 */
+    --c-faction-hum: #5BA3D0;  --c-faction-hum-d: #1F3A52;
+    --c-faction-term: #F5C518; --c-faction-term-d: #5C4A0A;
+    --c-faction-auto: #E74C3C; --c-faction-auto-d: #7A1F0E;
+    --c-faction-illu: #CF64F8; --c-faction-illu-d: #4A1F5C;
+    /* 标题层字体：参考站点随站点分发的 ZZZ-thick（粗黑标题字），正文与数据仍用思源黑体。
+       字形缺失时由后面的系统字体兜底，所以这里是一串而不是一个字族。 */
+    --font-title: "ZZZ-thick", "SourceHanSans", "Microsoft YaHei", sans-serif;
+    --font-body: "SourceHanSans", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg-deep); }
+  body {
+    width: 100%;
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.55;
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* —— 卡片外壳 —— */
+  .card {
+    padding: 20px 24px 14px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--yellow);
+  }
+  .card__header {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding-bottom: 10px;
+    border-bottom: 3px solid var(--yellow);
+  }
+  .card__header::after { content: ""; position: absolute; left: 0; right: 0; bottom: -7px; height: 3px; background: var(--stripe); }
+  /* 徽标：位图按 contain 缩放；矢量图标会被内联成 <svg>，由 fill 继承上色
+     （参考站点的阵营图标是纯黑剪影，不上色在黑底卡片上等于看不见）。 */
+  .card__emblem { flex: 0 0 auto; width: 44px; height: 44px; object-fit: contain; fill: var(--yellow); }
+  .card__emblem svg { display: block; width: 100%; height: 100%; }
+  .card__titles { flex: 1 1 auto; min-width: 0; }
+  .card__title { margin: 0; font-family: var(--font-title); font-size: 30px; line-height: 1.2; font-weight: 400; letter-spacing: 2px; color: var(--yellow); }
+  .card__subtitle { margin-top: 3px; font-size: 14px; letter-spacing: .5px; color: var(--text-dim); }
+  .card__meta { flex: 0 0 auto; text-align: right; font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+  /* 过期角标：实底红 + 黑字，是整张卡片上唯一允许「吵」的元素 */
+  .card__stale { margin-top: 4px; padding: 1px 8px; font-weight: 700; color: #0A0A0A; background: var(--warn); }
+  /* counter-reset 给段落标题的编号徽章（01/02/03…）用，编号随 DOM 顺序自增，
+     卡片模板不需要自己写序号，也就不存在「加了一节忘了改号」的问题 */
+  .card__body { padding-top: 14px; counter-reset: sec; }
+
+  /* —— 卡片内容通用组件 —— */
+  .section { margin-bottom: 14px; }
+  .section:last-child { margin-bottom: 0; }
+  /* 段落标题 = 编号徽章（::before 自增）+ 琥珀标题 + 45° 斜纹底条 + 底部分隔线。
+     用伪元素编号而不是改 12 个卡片模板的 DOM，是为了让「皮肤只动 base.tmpl」这条约定继续成立。 */
+  /* 小节标题：参考详情页的「**数据区**」标题——左侧一道琥珀竖条 + 粗黑标题字，
+    下面接一条描边；不再用满宽斜纹与编号徽章（那套底纹留给真正的警示状态）。 */
+  .section__title {
+    display: flex;
+    align-items: center;
+    margin: 0 0 9px;
+    padding: 2px 0 4px 10px;
+    border-left: 3px solid var(--yellow);
+    border-bottom: 1px solid var(--border);
+    font-family: var(--font-title);
+    font-size: 19px;
+    font-weight: 400;
+    letter-spacing: .06em;
+    color: var(--yellow);
+  }
+  .kpis { display: flex; gap: 12px; }
+  .kpi {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 10px 14px 8px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--yellow);
+  }
+  .kpi__value { font-size: 32px; line-height: 1.2; font-weight: 700; color: var(--yellow-2); font-variant-numeric: tabular-nums; }
+  .kpi__label { margin-top: 2px; font-size: 13px; letter-spacing: .5px; color: var(--text-dim); }
+  .list { margin: 0; padding: 0; list-style: none; }
+  .list__item { display: flex; align-items: baseline; gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .list__item:last-child { border-bottom: 0; }
+  .row { display: flex; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .row:last-child { border-bottom: 0; }
+  /* 带缩略图的行（/planets 热点）：图片与文字块垂直居中对齐，长文案不会被图片顶到顶上 */
+  .row--media { align-items: center; }
+  .grow { flex: 1 1 auto; min-width: 0; }
+  .muted { color: var(--text-dim); }
+  .text { margin: 0; white-space: pre-wrap; }
+  .icon { flex: 0 0 auto; width: 24px; height: 24px; object-fit: contain; }
+  .strong { color: #FFFFFF; font-weight: 700; }
+  .mono { font-family: Consolas, "Courier New", monospace; font-variant-numeric: tabular-nums; }
+  /* 标签：直角实底块，不用胶囊（零圆角规则） */
+  .tag { display: inline-block; padding: 1px 8px; font-size: 12px; font-weight: 700; letter-spacing: 1px; color: #0A0A0A; background: var(--text-dim); }
+  .tag--win { background: var(--ok); color: #FFFFFF; }
+  .tag--loss { background: var(--warn); color: #FFFFFF; }
+  .tag--gold { background: var(--yellow); }
+  .faction--humans { color: var(--c-humans); }
+  .faction--terminid { color: var(--c-terminids); }
+  .faction--automaton { color: var(--c-automaton); }
+  .faction--illuminate { color: var(--c-illuminate); }
+  /* 进度条：直角 + 硬描边，填充用琥珀 */
+  .bar { height: 8px; margin-top: 4px; background: var(--panel-2); border: 1px solid var(--border); }
+  .bar__fill { height: 100%; background: var(--yellow); }
+  .empty { margin: 0; color: var(--text-mute); }
+
+  /* —— 实景图（素材来源与许可见 assets/LICENSES.md）—— */
+  /* .hero 是单星球卡片的群系横幅：按参考站点的做法铺满正文宽度、固定高度裁切，
+     右下角压一块实底琥珀角标写清这是哪个群系（没有图时整个 figure 在模板里就不渲染）。 */
+  .hero { position: relative; margin: 0 0 14px; height: 150px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--border); }
+  .hero__img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .hero__tag { position: absolute; left: 0; bottom: 0; padding: 3px 12px; background: var(--yellow); color: #0A0A0A; font-size: 13px; font-weight: 700; letter-spacing: 1px; }
+  /* .thumb 是总览热点列表左侧的群系缩略图 */
+  .thumb { flex: 0 0 auto; width: 160px; height: 52px; overflow: hidden; background: var(--panel-2); border: 1px solid var(--border); }
+  .thumb img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  /* —— 星球卡（/planets 热点）：对齐社区站点 HD2 真理部的星球卡体系 ——
+     零圆角 · 阵营色主导：卡框与进度条取 --fc，斜纹底取 --fcd，两色由 .f-* 一起切换；
+     所以模板只写卡面的 @CardClass，不写任何颜色。排行榜式的信息密度：顶栏（派系 + 士兵数）、
+     群系实景图、战役类型与星球名、进度条与百分比。 */
+  .planet-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+  .planet-card {
+    --fc: var(--c-faction-hum);
+    --fcd: var(--c-faction-hum-d);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-deep);
+    border: 2px solid var(--fc);
+  }
+  .planet-card.f-term { --fc: var(--c-faction-term); --fcd: var(--c-faction-term-d); }
+  .planet-card.f-auto { --fc: var(--c-faction-auto); --fcd: var(--c-faction-auto-d); }
+  .planet-card.f-illu { --fc: var(--c-faction-illu); --fcd: var(--c-faction-illu-d); }
+  .planet-card.f-hum { --fc: var(--c-faction-hum); --fcd: var(--c-faction-hum-d); }
+  /* ① 顶栏：派系徽记 + 派系名 + 在线士兵 */
+  .pc-top { display: flex; align-items: center; gap: 8px; height: 38px; padding: 0 10px; background: rgba(255, 255, 255, .02); border-bottom: 1px solid var(--border); }
+  .pc-ficon { flex: 0 0 18px; width: 18px; height: 18px; object-fit: contain; fill: var(--fc); }
+  .pc-ficon svg { display: block; width: 100%; height: 100%; }
+  .pc-fname { font-size: 12.5px; font-weight: 700; color: var(--fc); letter-spacing: .06em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-res { margin-left: auto; display: flex; align-items: center; gap: 5px; flex-shrink: 0; font-size: 11px; color: var(--text-mute); }
+  /* 在线士兵数前面的增援标记：游戏里的原生图标（内联 SVG，自带金色描边，不再额外着色） */
+  .pc-reinf { flex: 0 0 14px; width: 14px; height: 14px; object-fit: contain; }
+  .pc-reinf svg { display: block; width: 100%; height: 100%; }
+  .pc-res .num { font-weight: 700; font-size: 13px; color: #FFF; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+  /* ② 群系实景图：固定 148px 高（与社区站点的 .pc-landmark 同高，卡片高度才和参考站一致）；
+     没有合适配图时用暗底斜纹占位并打上 NO LANDMARK 角标，保持整行卡片等高 */
+  .pc-landmark { position: relative; height: 148px; overflow: hidden; background: #0D1118; border-bottom: 1px solid var(--border); }
+  .pc-landmark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+  .pc-landmark.pc-nobiome { background: repeating-linear-gradient(45deg, rgba(255, 255, 255, .035) 0 6px, transparent 6px 12px), linear-gradient(180deg, #151B26 0%, #0B0E14 100%); }
+  .pc-landmark.pc-nobiome::after { content: "NO LANDMARK"; position: absolute; left: 8px; bottom: 6px; font-size: 9.5px; letter-spacing: .18em; color: rgba(255, 255, 255, .20); }
+  /* ③ 战役类型 + 星球名（防守战的星球名走白色，与进攻/解放区分） */
+  .pc-head { padding: 10px 12px 9px; }
+  .pc-type { display: block; font-size: 12px; color: var(--text); letter-spacing: .1em; line-height: 1.2; }
+  .pc-name { display: block; margin-top: 2px; font-family: var(--font-title); font-size: 20px; font-weight: 400; line-height: 1.3; letter-spacing: .04em; color: var(--yellow); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pc-name.def { color: #FFFFFF; }
+  .pc-sub { display: block; margin-top: 3px; font-size: 11.5px; color: var(--text-mute); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* ④ 进度条：已推进部分实色 + 剩余部分斜纹 + 左端三角游标（游标是社区站点同款，纯装饰，不表示进度） */
+  .pc-progress { padding: 0 12px 11px; }
+  .pc-bar { position: relative; display: flex; height: 9px; overflow: hidden; }
+  .pc-bar .fill { height: 100%; background: var(--fc); }
+  .pc-bar .slot { flex: 1; height: 100%; background: repeating-linear-gradient(45deg, var(--fcd) 0 6px, transparent 6px 12px); }
+  .pc-bar .cursor { position: absolute; left: 0; top: 50%; z-index: 1; transform: translateY(-50%); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; border-left: 6px solid var(--fc); }
+  .pc-stats { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 6px; }
+  .pc-stats .k { font-size: 11px; color: var(--text-mute); }
+  .pc-stats .v { font-size: 11.5px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  /* ⑤ 保卫倒计时（只有防守战才有）：与站点的 .pc-invtxt .timer 同口径——标签弱化、数值用警示色 */
+  .pc-timer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 7px 12px; border-top: 1px solid var(--border); }
+  .pc-timer .k { font-size: 12px; color: var(--text-mute); }
+  .pc-timer .timer { font-size: 15px; font-weight: 700; color: var(--warn); font-variant-numeric: tabular-nums; }
+
+  /* —— 单星球详情小节（/planet）：同一个卡框里接着排「星球情报 / 环境危害 / 星球事件」——
+     每个小节一行标题（中文 + 英文小字）＋「标签 · 数值」行；环境危害先列名字 chips，再逐条展开说明。 */
+  .pd-section { padding: 9px 12px 10px; border-top: 1px solid var(--border); }
+  .pd-title { font-size: 13px; font-weight: 700; letter-spacing: .06em; color: var(--yellow); }
+  .pd-title .pd-cn { margin-left: 7px; font-size: 9.5px; font-weight: 400; letter-spacing: .16em; color: var(--text-mute); }
+  .pd-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 3px 0; font-size: 12.5px; }
+  .pd-row > span { flex: 0 0 auto; color: var(--text-mute); }
+  /* 数值一律右对齐、白色；控制方那一格带 faction--* 时下面四条覆盖回阵营色（.pd-v 在前、覆盖在后） */
+  .pd-v { font-weight: 700; color: #FFFFFF; text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+  .pd-v.warn { color: var(--warn); }
+  .pd-v.faction--humans { color: var(--c-humans); }
+  .pd-v.faction--terminid { color: var(--c-terminids); }
+  .pd-v.faction--automaton { color: var(--c-automaton); }
+  .pd-v.faction--illuminate { color: var(--c-illuminate); }
+  .pd-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .pd-chip { padding: 2px 8px 3px; font-size: 12px; color: var(--text); background: var(--panel-2); border: 1px solid var(--border); }
+  .pd-chip.pd-chip-neg { color: var(--warn); border-color: var(--warn); }
+  .pd-trait { margin-top: 6px; padding: 5px 9px 6px; background: var(--panel-2); border-left: 2px solid var(--brass); }
+  .pd-trait b { font-size: 12.5px; color: var(--yellow); }
+  .pd-trait p { margin: 2px 0 0; font-size: 12px; color: var(--text-dim); }
+  .pd-empty { margin-top: 5px; font-size: 12.5px; color: var(--text-mute); }
+
+  /* —— 图鉴条目（/gun /strat /armor /grenade /enemy）：对齐社区站点 HD2 真理部的详情卡体系 ——
+     条目的「图 + 名称 + 标签」在一行，数值用自适应网格铺在下面。参考站的详情页把左主栏与右侧信息栏分成两列，
+     这里按用户 2026-09-17 的要求把右侧那一块并进主栏：整张卡只有一列，一张图就装得下。 */
+  .item {
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-top: 2px solid var(--brass);
+  }
+  .item:last-child { margin-bottom: 0; }
+  .item__head { display: flex; align-items: center; gap: 12px; }
+  .item__text { flex: 1 1 auto; min-width: 0; }
+  .item__name { font-family: var(--font-title); font-size: 25px; font-weight: 400; line-height: 1.25; letter-spacing: .04em; color: #FFFFFF; }
+  .item__name .model { margin-left: 8px; font-size: 13px; font-weight: 700; letter-spacing: .08em; color: var(--brass); }
+  .item__en { margin-top: 1px; font-size: 12.5px; color: var(--text-mute); }
+  .item__acq { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); }
+  /* 装备图与敌人图标：方图标与长枪管渲染图都有，统一 contain，不裁掉内容。
+     .media--wide 用在列表条目上，.media--hero 用在单件详情头上。 */
+  .media { flex: 0 0 auto; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--panel-2); border: 1px solid var(--border); }
+  .media img { display: block; max-width: 100%; max-height: 100%; }
+  .media--wide { width: 168px; height: 92px; }
+  .media--hero { width: 240px; height: 132px; }
+  /* 敌人图是方形图标，用方框比宽框更贴图 */
+  .media--enemy { width: 168px; height: 168px; }
+  /* 标签：类别、武器类型、射击模式、派系变体这类弱信息，琥珀描边小方块（零圆角）。 */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  /* 标签：参考详情页的方角描边小标签（透明底 + currentColor 描边），比实底块克制 */
+  .chip { padding: 2px 8px; font-size: 11.5px; letter-spacing: .06em; color: var(--brass); background: transparent; border: 1px solid var(--brass); }
+  /* —— 数值网格（对应参考站的 label/value 数据表）——
+     每格 flex: 1 1 基础宽度，一行铺满整宽（不留空缺口），装不下自动换行。
+     1px 间隙露出底色当网格线，比给每一格描边更像数据表。 */
+  .grid { display: flex; flex-wrap: wrap; gap: 1px; margin-top: 8px; background: var(--border); border: 1px solid var(--border); }
+  /* —— 基础信息行（对应参考站点详情页的 .field）——
+     左标签弱化、右数值白色加粗，一行一条细描边；字段少（操作性 / 部署 / 护甲 / 敌人属性）时用它，
+     比铺一格一格的网格更接近参考站的「信息栏」观感；伤害部件那种多格并列仍走 .grid/.cell。 */
+  .fields { margin-top: 8px; border-top: 1px solid var(--border); }
+  .field { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .field:last-child { border-bottom: 0; }
+  .field__k { flex: 0 0 auto; font-size: 12px; letter-spacing: .04em; color: var(--text-mute); }
+  .field__v { font-size: 13.5px; font-weight: 700; color: #FFFFFF; text-align: right; font-variant-numeric: tabular-nums; word-break: break-word; }
+  /* 阵营配色的数值：写在 .field__v 之后才能压过上面的白色（同权重看先后） */
+  .field__v.faction--humans { color: var(--c-humans); }
+  .field__v.faction--terminid { color: var(--c-terminids); }
+  .field__v.faction--automaton { color: var(--c-automaton); }
+  .field__v.faction--illuminate { color: var(--c-illuminate); }
+  .cell { flex: 1 1 108px; min-width: 108px; padding: 5px 9px 6px; background: var(--panel-2); }
+  .cell__k { font-size: 11px; letter-spacing: .4px; color: var(--text-mute); }
+  .cell__v { margin-top: 1px; font-size: 14px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; word-break: break-word; }
+  /* 阵营配色的那几格在 .faction--* 之后定义：这几个覆盖要写在 .cell__v 后面，
+     否则 #FFFFFF 会把阵营色压掉（同权重看先后），敌人的阵营格就白写了 class。 */
+  .cell__v.faction--humans { color: var(--c-humans); }
+  .cell__v.faction--terminid { color: var(--c-terminids); }
+  .cell__v.faction--automaton { color: var(--c-automaton); }
+  .cell__v.faction--illuminate { color: var(--c-illuminate); }
+  /* 攻击部件（单件详情卡）：每个部件一块，标题条带 45° 斜纹。 */
+  .attack { margin-top: 8px; border: 1px solid var(--border); }
+  .attack:first-of-type { margin-top: 0; }
+  /* 部件标题用平底而不用斜纹：斜纹是小节标题（.section__title）的语言，
+     两层斜纹挨在一起会把卡片点亮成一片噪音。 */
+  .attack__head { display: flex; align-items: center; gap: 8px; padding: 5px 9px; background: var(--panel); border-bottom: 1px solid var(--border-h); font-size: 13px; font-weight: 700; letter-spacing: .5px; color: var(--yellow); }
+  .attack .grid { margin-top: 0; border: 0; }
+  /* 召唤指令：键帽式方框，亮底，一眼能顺着按。 */
+  .summon { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+  .summon__k { margin-right: 3px; font-size: 11.5px; color: var(--text-mute); }
+  /* 箭头本身是游戏里的图形（内联 SVG，fill: #F2F2F2），由模板的 icon 函数渲染，
+     所以这里只管盒子与着色。 */
+  .summon__arrow { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; color: #F2F2F2; background: var(--panel-2); border: 1px solid var(--line-2); }
+  .summon__arrow svg { display: block; width: 15px; height: 15px; fill: #F2F2F2; }
+  /* 行标题：标签弱化 + 内容正文。 */
+  .line { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); }
+  .line__k { margin-right: 8px; color: var(--text-mute); }
+  /* 伤害说明（敌人卡）：一条一行，左侧一段黄铜竖条当项符。 */
+  .damage { margin-top: 8px; }
+  .damage__row { padding: 3px 0 3px 9px; font-size: 13px; color: var(--text); border-left: 2px solid var(--brass); }
+  .damage__row + .damage__row { margin-top: 4px; }
+  /* 详情描述（内置社区维基那一句）：比英文名重一点，但不抢名字的注意力。 */
+  .item__desc { margin-top: 7px; font-size: 12.5px; line-height: 1.5; color: var(--text-dim); }
+  /* —— 图鉴详情版式（参照 HD2_Wiki 的 weapon.html / enemy.html）——
+     左主栏 + 右侧栏两列；每段是一个「面板」（1px 硬描边 + 2px 黄铜顶条 + 虚线分节头），
+     数值是各自带边框的小格：这是参照站详情页的骨架，用它排出来的信息密度比单列大得多。 */
+  .wiki { display: grid; grid-template-columns: minmax(0, 2.05fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+  .wiki__main, .wiki__side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-top: 2px solid var(--brass); }
+  .panel__head { display: flex; align-items: center; gap: 8px; margin: 0; padding: 7px 10px 6px; font-family: var(--font-title); font-size: 15px; font-weight: 400; letter-spacing: 1px; color: var(--yellow); border-bottom: 1px dashed var(--border-h); }
+  .panel__head small { font-family: var(--font-body); font-size: 11.5px; letter-spacing: 0; color: var(--text-mute); }
+  .panel__body { padding: 10px; }
+  /* 侧栏面板用黄铜色标题：与主栏的琥珀标题分级，一眼分得出主次。 */
+  .panel--side .panel__head { font-size: 13.5px; color: var(--brass); }
+  /* 数值小格：参照站的「详细数据」就是一张 4 列小格网，格子之间留缝、每格自带描边。 */
+  .tiles { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+  .tiles--inner { margin-top: 8px; }
+  .tile { min-width: 0; padding: 5px 8px 6px; background: var(--panel-2); border: 1px solid var(--line-2); }
+  .tile__k { display: block; font-size: 11.5px; color: var(--text-mute); }
+  .tile__v { display: block; margin-top: 1px; font-size: 13.5px; font-weight: 700; color: #FFFFFF; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  /* 基础信息 / 侧栏的「左标签右数值」行：隔行底色，值那列等宽数字。 */
+  .kv { border: 1px solid var(--line-2); background: var(--panel-2); }
+  .kv__row { display: grid; grid-template-columns: 32% minmax(0, 1fr); gap: 8px; padding: 5px 9px; font-size: 12.5px; border-bottom: 1px solid var(--line-2); }
+  .kv__row:last-child { border-bottom: 0; }
+  .kv__row:nth-child(even) { background: #0D0D0D; }
+  .kv__k { color: var(--text-mute); }
+  .kv__v { color: var(--text); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+  /* 阵营配色的那几行写在 .kv__v / .tile__v 之后：同权重看先后，不然上方的前景色会把它压掉。 */
+  .kv__v.faction--humans, .tile__v.faction--humans { color: var(--c-humans); }
+  .kv__v.faction--terminid, .tile__v.faction--terminid { color: var(--c-terminids); }
+  .kv__v.faction--automaton, .tile__v.faction--automaton { color: var(--c-automaton); }
+  .kv__v.faction--illuminate, .tile__v.faction--illuminate { color: var(--c-illuminate); }
+  /* 侧栏顶部的「名字 + 小图 + 总生命值」高亮块。 */
+  .side-sum { display: flex; align-items: center; gap: 10px; }
+  .side-sum__img { flex: 0 0 auto; width: 58px; height: 58px; object-fit: contain; background: #0B0B0B; border: 1px solid var(--line-2); }
+  .side-sum__hp { margin-left: auto; text-align: right; font-size: 11.5px; color: var(--text-mute); }
+  .side-sum__hp b { display: block; font-family: var(--font-title); font-size: 22px; font-weight: 400; letter-spacing: 1px; color: var(--yellow); }
+  /* 侧栏名单（同阵营敌人这类）：一行一条，左侧 2px 竖条当导航感。 */
+  .navlist { display: flex; flex-direction: column; gap: 4px; }
+  .navlist__row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; padding: 4px 9px; font-size: 12.5px; color: var(--text-dim); background: var(--panel-2); border: 1px solid var(--border); border-left: 2px solid var(--line-2); }
+  .navlist__row em { font-style: normal; font-size: 11.5px; color: var(--text-mute); }
+  /* 来源链接：文字型地址，长地址允许断行。 */
+  .source { font-size: 12px; color: var(--text-dim); overflow-wrap: anywhere; }
+  /* 外观大图：参照站是整块大图（.arena 那块），这里同宽居中，图本身按 contain 缩放。 */
+  .hero__img { display: flex; align-items: center; justify-content: center; padding: 10px; background: var(--panel-2); border: 1px solid var(--line-2); }
+  .hero__img img { display: block; max-width: 100%; max-height: 260px; object-fit: contain; }
+  /* 敌人部位表：横表（参照站那 8 列的「部位数据」），窄列用等宽数字，行高压住免得一屏塞不下。
+     表头与参照站一致：斜纹底 + 琥珀字；隔行底色，行线用浅描边。 */
+  .parts { border: 1px solid var(--border); }
+  .parts table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .parts th { padding: 5px 8px; text-align: left; font-size: 11.5px; font-weight: 700; letter-spacing: .5px; color: var(--yellow); background: var(--stripe); border-bottom: 1px solid var(--border-h); }
+  .parts td { padding: 4px 8px; color: var(--text); border-bottom: 1px solid var(--line-2); }
+  .parts tbody tr:last-child td { border-bottom: 0; }
+  .parts tbody tr:nth-child(even) td { background: #0D0D0D; }
+  .parts__flag { margin-right: 6px; color: var(--yellow); }
+  /* 部位示意图：表格里那格只有几十 px，按 contain 缩放，深底免得透明图看不清。 */
+  .part-img { display: block; width: 52px; height: 33px; object-fit: contain; background: #0B0B0B; border: 1px solid var(--line-2); }
+  /* 使用策略：参考站也是有序列表。 */
+  .tips { margin: 0; padding-left: 20px; font-size: 12.5px; color: var(--text-dim); }
+  .tips li { margin-top: 4px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <header class="card__header">
+    {{if .Emblem}}{{icon .Emblem "card__emblem"}}{{end}}
+    <div class="card__titles">
+      <h1 class="card__title">{{.Title}}</h1>
+      {{if .Subtitle}}<div class="card__subtitle">{{.Subtitle}}</div>{{end}}
+    </div>
+    <div class="card__meta">
+      {{if .DataTime}}<div>数据时间 {{.DataTime}}</div>{{end}}
+      {{if .Stale}}<div class="card__stale">⚠ 数据可能已过期</div>{{end}}
+    </div>
+  </header>
+  <main class="card__body">{{template "body" .}}</main></div>
+</body>
+</html>
+{{end}}

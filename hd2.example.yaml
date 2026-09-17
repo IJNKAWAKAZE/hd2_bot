@@ -1,0 +1,77 @@
+bot:
+  name:            # 机器人用户名（不带 @）
+  token:           # BotFather 下发的 token
+  owner:           # 拥有者 user id，0 表示不限制
+  group_id:        # ★ 本机器人服务的群 id，群里的查询与推送都以此为准
+  msg_del_delay: 10 # 机器人消息自动删除延迟（秒），0 表示不删除
+  photo_del_delay: 0 # 图片消息自动删除延迟（秒），0 表示不删除
+  debug: false
+
+api:
+  client: hd2_bot          # 上游要求的 X-Super-Client
+  contact:                 # 上游要求的 X-Super-Contact，必填，填你自己的联系方式
+  user_agent: hd2_bot/0.1
+  timeout: 30              # 单次请求超时（秒）
+  base_helldivers: https://api.helldivers2.dev/api/v1
+  base_companion: https://helldiverscompanion.com/api
+
+cache:
+  war_ttl: 60           # 战况缓存（秒）
+  planets_ttl: 60       # 星球列表缓存（秒）
+  campaigns_ttl: 120
+  assignments_ttl: 300  # 重要指令
+  dispatches_ttl: 600   # 战役简报
+  events_ttl: 300       # 星球事件
+  stations_ttl: 120     # 民主空间站
+
+limit:
+  rate: 4             # 每个窗口允许的请求数（上游实测上限 5 次/分钟/IP，留余量）
+  window: 60          # 窗口秒数：上游是「5 次/分钟/IP」，这里必须写 60
+  cooldown: 20        # 收到 429 后的默认冷却秒数
+  retry_max: 3        # 5xx / 网络错误的最大尝试次数
+  retry_base: 5       # 退避起始秒数
+  retry_max_delay: 45 # 退避上限秒数
+
+http:
+  host: 127.0.0.1
+  port: 25555
+
+render:
+  enabled: true    # 关闭后所有命令直接走纯文本
+  width: 900       # 卡片 CSS 宽度（px）
+  scale: 2         # 设备缩放，2 = 二倍图
+  timeout: 15      # 单张渲染超时（秒）
+  format: png      # png | jpeg
+
+inline:
+  prefix: "星球-"   # 行内查询前缀，不能含空格或制表符
+
+translate:
+  enabled: true              # 关掉后所有正文保持英文
+  mode: auto                 # auto=填了 api_url 就走 OpenAI 兼容接口、否则走 free_api_url；openai / free 为强制指定
+  api_url: ""                # OpenAI 兼容地址（例如 https://api.openai.com/v1），auto 下留空即走免费接口
+  api_key: ""                # 复制本文件到 hd2.yaml 后再填（hd2.yaml 已被 .gitignore 忽略，不进仓库、不进日志）
+  model: gpt-4o-mini         # OpenAI 兼容后端使用的模型名
+  target_lang: zh-CN
+  timeout: 20                # 单次请求超时（秒）；慢速模型可调大
+  max_tokens: 1200           # 译文输出上限，防免费模型自行加戏
+  min_interval: 0            # 相邻请求最小间隔，只写整数秒（3 次/分钟就填 20）；写小数会被截断成整数秒，需要亚秒粒度得改字段类型
+  error_cooldown: 120        # 429/5xx 后的冷却，只写整数秒；写小数会被截断（0.4 会变成 0＝完全不冷却）
+  free_api_url: https://uapis.cn/api/v1/ai/translate  # 走 free 链路时，待翻译的上游正文会原样发给这个第三方免费接口
+
+arsenal:
+  dir: data/arsenal           # 装备目录与装备图的缓存目录（相对进程工作目录）
+  ttl: 86400                  # 目录缓存有效期（秒）；上游一天一更
+  timeout: 30                 # 单次下载超时（秒）
+  mirror: https://gh-proxy.org/  # GitHub 镜像前缀，主源连不上时才用；填 "-" 表示不用镜像
+
+bestiary:
+  dir: data/bestiary          # 敌人图鉴的缓存目录
+  ttl: 86400                  # 图鉴缓存有效期（秒）
+  timeout: 20                  # 单次请求超时（秒）
+  wiki_api: https://helldivers.wiki.gg  # 敌人数据与图标的来源站点
+
+push:
+  enabled: true
+  cron: "15 */5 * * * *"     # 与心跳（整 5 分钟）错开，避免同一秒并发取数
+  max_items: 5               # 每节最多列几条

@@ -1,0 +1,23 @@
+{{- /* push 是战况推送卡片：把一轮轮询检测到的四类变化汇总成一条消息。
+       视图模型是 Go 侧的 push.Card，节与条目都已经在 Go 侧分好组、截断好，模板只排版。
+       节为空的情况在 Go 侧就已经不存在了（BuildCard 不会为空节建 Section），
+       所以这里不需要再判空；More 为空时不渲染截断说明。 */ -}}
+{{define "body"}}
+{{range .Sections}}
+<section class="section">
+  <h2 class="section__title">{{.Title}}</h2>
+  <ul class="list">
+    {{range .Items}}
+    <li class="list__item">
+      <div class="grow">
+        <div class="strong">{{.Title}}</div>
+        {{if .Detail}}<div class="muted">{{.Detail}}</div>{{end}}
+      </div>
+    </li>
+    {{end}}
+  </ul>
+  {{if .More}}<div class="muted">{{.More}}</div>{{end}}
+</section>
+{{end}}
+{{if .Note}}<section class="section"><div class="muted">{{.Note}}</div></section>{{end}}
+{{end}}
