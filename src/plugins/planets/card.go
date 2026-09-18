@@ -123,7 +123,9 @@ type EnvItem struct {
 //
 // 版式对齐社区站点 HD2 真理部星图页的星球卡：阵营色卡框（.f-* 切 --fc/--fcd）＋
 // 顶栏的派系徽记与在线士兵 ＋ 群系实景图 ＋ 战役状态与星球名 ＋ 进度条，
-// 下面接「星球情报 / 环境危害 / 星球事件」三个小节（.pd-*）。
+// 下面接「战略情报分析 / 星球情报 / 环境危害 / 行动变量 / 兴趣点 / 星球事件」六个小节（.pd-*）：
+// 前三块里「战略情报分析」只靠星球自身的数据算得出（见 planetIntel），
+// 「行动变量」与「兴趣点」需要别的接口的数据，由 FillPlanetExtras 在取到之后补上。
 // 所有文案、配色 class、素材逻辑名都由这一层给好，模板只排版、不做计算。
 type PlanetCard struct {
 	render.Meta
@@ -153,6 +155,12 @@ type PlanetCard struct {
 	Regen        string // 每秒回复，例如「5.6 /秒」
 	Attacking    string // 这颗星球正在进攻的目标星球编号；没有时为空串
 	Event        *PlanetEventCard
+
+	// 以下三块是用户 2026-09-18 要求加的（参照社区站点 HD2 真理部星图页的星球详情）：
+	Intel       []IntelRow   // 战略情报分析：解放度 / 抵抗度 / 星球血量 / 玩家数量
+	EffectChips []EffectChip // 行动变量（补充源给出的 galactic effect，中文对照）
+	EffectNote  string       // 没有行动变量时的一句说明：区分「确实没有」与「补充源没取到」
+	POIs        []POIChip    // 兴趣点：MO 目标 / 战役 / DSS 停靠 / 敌军反攻 / 星区
 }
 
 // SummarizePlanets 把星球列表与战况聚合成总览所需的全部数字与热点顺序。
@@ -328,16 +336,10 @@ func defenseTimerText(e *hd2.PlanetEvent, fetchedAt time.Time) string {
 	return formatCountdown(remaining)
 }
 
-// formatCountdown 把剩余时长排成「1天 02:33:12」；不足一天时省掉「0天」。
-// 秒位保留两位是为了和游戏内的防守倒计时对得上，玩家能直接拿去比对自己客户端上的时间。
+// formatCountdown 保留本包的调用点，实际排版交给 plugutil.CountdownText：
+// 空间站卡的「冷却剩余」用的是同一份格式，两处各写一份迟早会出现两种写法。
 func formatCountdown(d time.Duration) string {
-	total := int64(d / time.Second)
-	days := total / 86400
-	clock := fmt.Sprintf("%02d:%02d:%02d", (total%86400)/3600, (total%3600)/60, total%60)
-	if days > 0 {
-		return fmt.Sprintf("%d天 %s", days, clock)
-	}
-	return clock
+	return plugutil.CountdownText(d)
 }
 
 // rowProgress 决定总览热点行的进度条（spec §7.2 的「解放/防守进度条」）：
@@ -444,6 +446,7 @@ func BuildPlanetCard(p hd2.Planet, fetchedAt time.Time, stale bool) PlanetCard {
 		Regen:        fmt.Sprintf("%.1f /秒", p.RegenPerSecond),
 		Attacking:    attackingText(p.Attacking),
 		Event:        buildPlanetEventCard(p.Event, loc),
+		Intel:        planetIntel(p),
 	}
 }
 
@@ -698,7 +701,27 @@ func BuildLocalizedPlanetCard(ctx context.Context, p hd2.Planet, fetchedAt time.
 	return finishEnvironment(card)
 }
 
+// attackingNames 把「正在进攻的目标」编号翻成星球名（中文（English）），彼此用「、」隔开。
+// 名字查不到时退回「#N」——宁可显示编号，也不要编一个名字（同 orders 包的 planetLabel 口径）。
+func attackingNames(indexes []int, planets []hd2.Planet) string {
+	names := make(map[int]string, len(planets))
+	for _, p := range planets {
+		names[p.Index] = p.Name
+	}
+	parts := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		name := strings.TrimSpace(names[index])
+		if name == "" {
+			parts = append(parts, fmt.Sprintf("#%d", index))
+			continue
+		}
+		parts = append(parts, plugutil.PlanetDisplayName(name))
+	}
+	return strings.Join(parts, "、")
+}
+
 // attackingText 拼这颗星球正在进攻的目标编号；上游用 []int 给编号（实测是相邻星球编号）。
+// 这是没有星球列表时的兜底（BuildPlanetCard 阶段）；/planet 会在 FillPlanetExtras 里换成星球名。
 func attackingText(indexes []int) string {
 	if len(indexes) == 0 {
 		return ""
@@ -740,4 +763,349 @@ func sharePercent(n, total int) float64 {
 		return 0
 	}
 	return round1(clampPercent(float64(n) / float64(total) * 100))
+}
+
+// ---- 战略情报分析 / 行动变量 / 兴趣点（用户 2026-09-18 要求，参照社区站点 HD2 真理部星图页的星球详情）----
+
+// IntelRow 是「战略情报分析」里的一行：标签 + 数值 + 数值配色 class。
+type IntelRow struct {
+	Label string
+	Value string
+	Class string // 数值的配色 class（抵抗强度四档等）；空串表示按普通数值显示
+}
+
+// EffectChip 是一条行动变量（galactic effect）在卡片上的展示形态。
+type EffectChip struct {
+	Name        string // 中文名；对照表没收录时是「未知行动变量」（见 unknownEffectText）
+	Description string // 中文说明；没有说明时为空串
+	Category    string // 分类中文名；没有时为空串
+	Negative    bool   // 作战限制类：卡片上用红色标出来
+}
+
+// POIChip 是兴趣点上的一枚标签。
+type POIChip struct {
+	Text  string // 标签文案（带 emoji）
+	Class string // 配色 class；空串表示普通标签
+}
+
+// PlanetExtras 是单星球卡的补充数据。
+//
+// 这些数据都来自星球自身之外（其它接口），任何一项取不到都不该影响主卡——
+// 缺了只会少几枚兴趣点标签或写一句「行动变量暂不可用」，不会让整张卡变成错误提示。
+//
+// 来源分工：Planets / Campaigns / Assignments / Stations 来自主数据源；
+// Effects 来自补充源（主数据源的 /planets 没有 activeEffects 字段，只能另取一份）。
+//
+// EffectsKnown 刻意是三态：区分「补充源说这颗星球没有行动变量」与「补充源没取到」——
+// 卡片上分别写「暂无已知行动变量」与「行动变量信息暂不可用」。把后者说成前者就是在编数据。
+type PlanetExtras struct {
+	Planets      []hd2.Planet       // 全量星球：用来找「敌军反攻」是从哪颗星球来的
+	Campaigns    []hd2.Campaign     // 进行中的战役：兴趣点里的「战役进行中」
+	Assignments  []hd2.Assignment   // 重要指令：兴趣点里的「重要指令目标」
+	Stations     []hd2.SpaceStation // 民主空间站：兴趣点里的「DSS 停靠中」
+	Effects      []hd2.PlanetEffect // 各星球的行动变量（补充源）
+	EffectsKnown bool               // 补充源是否取到（false 时写「暂不可用」而不是「暂无」）
+}
+
+// effectsEmptyText 是补充源明确表示「这颗星球没有行动变量」时的文案，用参考站的原话。
+const effectsEmptyText = "暂无已知行动变量。"
+
+// effectsUnknownText 是补充源没取到时的文案：与「暂无」分开说，不把「不知道」写成「没有」。
+// 文本回退会在这句前面加「行动变量：」，所以这里不再重复那四个字。
+const effectsUnknownText = "暂不可用（补充数据源未取到）。"
+
+// unknownEffectText 是「ID 查不到中文名」时的占位标签。
+//
+// 刻意不写「效果 #1272」这类编号：群里没人认得编号，摆在卡上只是噪声（参考站对这类效果是直接不显示的）。
+// 但也刻意不整条丢掉——上游报了它，就说明这颗星球确实带着一条我们不认识的效果，
+// 写一句「未知行动变量」比假装没有更有用。同一颗星球上多条未知效果只占一个位置。
+const unknownEffectText = "未知行动变量"
+
+// FillPlanetExtras 把补充数据填进单星球卡：行动变量区块与兴趣点区块。
+// 星球自身的信息（含战略情报分析）在 BuildPlanetCard / BuildLocalizedPlanetCard 里已经算完，
+// 这里只补「必须有外部数据才说得出口」的那两块。
+func FillPlanetExtras(card PlanetCard, p hd2.Planet, extras PlanetExtras) PlanetCard {
+	// 「进攻目标」在 BuildPlanetCard 里只能写编号（那时手里还没有别的星球），这里补上星球名：
+	// 卡面上一行「编号 173」在群里没人能对上号。取不到那颗星球时 attackingNames 会退回编号。
+	if len(p.Attacking) > 0 {
+		card.Attacking = attackingNames(p.Attacking, extras.Planets)
+	}
+	card.EffectChips = planetEffectChips(p.Index, extras)
+	if len(card.EffectChips) == 0 {
+		if extras.EffectsKnown {
+			card.EffectNote = effectsEmptyText
+		} else {
+			card.EffectNote = effectsUnknownText
+		}
+	}
+	card.POIs = planetPOIs(p, extras)
+	return card
+}
+
+// planetIntel 组装「战略情报分析」四行：解放度 / 抵抗度 / 星球血量 / 玩家数量。
+//
+// 口径对齐参考站：
+//   - 解放度 = 100% − 星球血量百分比（实测敌方控制星球的 health 随我方推进下降，所以这个反推是对的）；
+//   - 抵抗度 = 每秒回复量 ÷ 星球血量上限 × 3600 × 100，也就是「每小时恢复总血量的百分之几」。
+//     这个换算与参考站数据里的 resistance 字段逐颗星球完全一致（实测 273/273），
+//     所以卡片上直接算得出来，不必再依赖一个我们没有的数据字段；
+//   - 星球血量与玩家数量原样展示（玩家数为 0 时写「—」，参考站也是这么处理的）。
+func planetIntel(p hd2.Planet) []IntelRow {
+	rows := make([]IntelRow, 0, 4)
+	rows = append(rows, IntelRow{Label: "解放度", Value: liberationText(p)})
+	resistText, resistClass := resistanceText(p)
+	rows = append(rows, IntelRow{Label: "抵抗度", Value: resistText, Class: resistClass})
+	rows = append(rows, IntelRow{Label: "星球血量", Value: healthPercentText(p)})
+	// 玩家数量与卡面顶栏的「在线士兵」同源，这里按参考站再列一行：详情区不必回头去看顶栏。
+	players := plugutil.DashText
+	if p.Statistics.PlayerCount > 0 {
+		players = plugutil.FormatInt(p.Statistics.PlayerCount)
+	}
+	rows = append(rows, IntelRow{Label: "玩家数量", Value: players})
+	return rows
+}
+
+// liberationPercent 返回解放度百分比（0-100，不四舍五入）。
+// 上游偶尔给出 health > maxHealth 的脏数据，所以最后夹一次区间。
+func liberationPercent(p hd2.Planet) float64 {
+	if p.MaxHealth <= 0 {
+		return 0
+	}
+	return clampPercent(100 - float64(p.Health)/float64(p.MaxHealth)*100)
+}
+
+// liberationText 给「解放度」那一行：
+//   - 已解放：卡面头部就是这么标的，或者血量拉满（≥99.9%）；
+//   - 超级地球控制中：我方控制但卡面头部另有说法（例如正在挨打的防守战），
+//     这时候说「0.00%」会让人以为这颗星球还没拿下来；
+//   - 其余：两位小数的解放度，敌方控制的星球就是它在慢慢涨。
+func liberationText(p hd2.Planet) string {
+	percent := liberationPercent(p)
+	if planetStatusText(p) == "已解放" || percent >= 99.9 {
+		return "已解放"
+	}
+	if !isEnemyOwner(p.CurrentOwner) && percent <= 0.01 {
+		return "超级地球控制中"
+	}
+	return fmt.Sprintf("%.2f%%", percent)
+}
+
+// 抵抗强度四档的配色 class；阈值与参考站一致（低 ≤1.99 / 中 2–2.99 / 高 3–3.99 / 极高 ≥4）。
+const (
+	resistClassNone = "res-none"
+	resistClassLow  = "res-low"
+	resistClassMid  = "res-mid"
+	resistClassHigh = "res-high"
+	resistClassMax  = "res-max"
+)
+
+// resistancePercentPerHour 把每秒回复量换算成「每小时恢复星球总血量的百分之几」。
+// 换算结果保留两位小数：上游给的是浮点，卡片上再多的小数位也没有意义。
+func resistancePercentPerHour(p hd2.Planet) float64 {
+	if p.MaxHealth <= 0 || p.RegenPerSecond <= 0 {
+		return 0
+	}
+	return math.Round(p.RegenPerSecond/float64(p.MaxHealth)*3600*100*100) / 100
+}
+
+// resistanceText 拼「抵抗度」那一行：数值 + 强度词，并给出配色 class。
+// 数值按最短形式显示（1.5 / 2 / 0.75），不补无意义的零——参考站也是这么显示的。
+func resistanceText(p hd2.Planet) (string, string) {
+	percent := resistancePercentPerHour(p)
+	if percent <= 0 {
+		return "无", resistClassNone
+	}
+	class := resistClassLow
+	switch {
+	case percent < 2:
+		class = resistClassLow
+	case percent < 3:
+		class = resistClassMid
+	case percent < 4:
+		class = resistClassHigh
+	default:
+		class = resistClassMax
+	}
+	word := map[string]string{
+		resistClassLow:  "低",
+		resistClassMid:  "中",
+		resistClassHigh: "高",
+		resistClassMax:  "极高",
+	}[class]
+	return fmt.Sprintf("%s%% / 小时（%s）", strconv.FormatFloat(percent, 'f', -1, 64), word), class
+}
+
+// healthPercentText 拼「星球血量」那一行：「100% · 1,000,000 / 1,000,000」。
+// 百分比取整（参考站口径），血量用千分位；上游没给上限时写「—」，不写一个算不出来的百分比。
+func healthPercentText(p hd2.Planet) string {
+	if p.MaxHealth <= 0 {
+		return plugutil.DashText
+	}
+	percent := int64(math.Round(float64(p.Health) / float64(p.MaxHealth) * 100))
+	return fmt.Sprintf("%d%% · %s", percent, plugutil.HealthText(p.Health, p.MaxHealth))
+}
+
+// planetEffectChips 把一颗星球的行动变量 ID 翻成卡片上的标签。
+//
+// 去重分两层：同一个 ID 重复出现只留一条（上游实测会重复），同名的不同 ID 也只留一条
+// ——行动变量常有「基础 id 与变体 id」两个编号（掠食变种 1243/1245、炽灼部队 1248/1249），
+// 名字一样、说明一样，列两遍只是把版面撑长（参考站也按名字去重）。
+// 查不到中文名的（含只有内部代号的新效果）合并成一条「未知行动变量」，不显示编号。
+func planetEffectChips(index int, extras PlanetExtras) []EffectChip {
+	chips := make([]EffectChip, 0, 4)
+	seenID := make(map[int]bool, 4)
+	seenName := make(map[string]bool, 4)
+	for _, effect := range extras.Effects {
+		if effect.PlanetIndex != index || seenID[effect.EffectID] {
+			continue
+		}
+		seenID[effect.EffectID] = true
+		info, ok := hd2.GalacticEffectOf(effect.EffectID)
+		name := strings.TrimSpace(info.Name)
+		if !ok || name == "" {
+			// 对照表与别名表都没收录：合并成一条占位标签，不猜名字、也不显示编号。
+			if seenName[unknownEffectText] {
+				continue
+			}
+			seenName[unknownEffectText] = true
+			chips = append(chips, EffectChip{Name: unknownEffectText})
+			continue
+		}
+		if seenName[name] {
+			continue
+		}
+		seenName[name] = true
+		chips = append(chips, EffectChip{
+			Name:        name,
+			Description: info.Desc,
+			Category:    info.Category,
+			Negative:    info.Negative,
+		})
+	}
+	return chips
+}
+
+// campaignTypeDefense 是战役类型里的「入侵防御战」，其余取值一律按解放战役处理。
+// 实测（2026-09-18，共 37 场战役）：type 4 的两场都与 planetEvents 里的防守事件一一对应，
+// 另外 35 场全是 type 0。上游没有公布枚举含义，这里只按实测用法翻译，未收录的取值不猜。
+const campaignTypeDefense = 4
+
+// planetPOIs 组装兴趣点标签，五类口径对齐参考站（写不出结论的一律不写）：
+//   - 🎯 重要指令目标：某条重要指令任务的 valueType 12 就是这颗星球的编号；
+//   - ⚔️ 战役进行中：这颗星球在战役列表里，按战役类型分「入侵防御战」与「解放战役」
+//     （有防守事件也算防御战：事件与战役类型同源，任一先到都能得出结论）；
+//   - 🛰️ DSS 停靠中：空间站的停靠星球就是它；
+//   - ⚠️ 敌军反攻中：另一颗星球正在进攻它（来源星球见 counterAttackSource）；
+//   - 🌍 星区：始终显示，作为最后一条兜底信息。
+func planetPOIs(p hd2.Planet, extras PlanetExtras) []POIChip {
+	pois := make([]POIChip, 0, 5)
+	if isMOTarget(p.Index, extras.Assignments) {
+		pois = append(pois, POIChip{Text: "🎯 重要指令目标", Class: "poi-mo"})
+	}
+	switch campaignKind(p, extras.Campaigns) {
+	case campaignDefense:
+		pois = append(pois, POIChip{Text: "⚔️ 入侵防御战进行中", Class: "poi-camp"})
+	case campaignLiberation:
+		pois = append(pois, POIChip{Text: "⚔️ 解放战役进行中", Class: "poi-camp"})
+	}
+	if dssDocked(p.Index, extras.Stations) {
+		pois = append(pois, POIChip{Text: "🛰️ DSS 民主空间站停靠中", Class: "poi-dss"})
+	}
+	if source, ok := counterAttackSource(p.Index, extras.Planets); ok {
+		pois = append(pois, POIChip{Text: "⚠️ 敌军反攻中 · 来自 " + source, Class: "poi-atk"})
+	}
+	pois = append(pois, POIChip{Text: "🌍 星区：" + sectorText(p.Sector)})
+	return pois
+}
+
+// 战役种类：兴趣点的文案按它挑。
+const (
+	campaignNone = iota
+	campaignLiberation
+	campaignDefense
+)
+
+// campaignKind 判断这颗星球当前在打哪一类战役。
+// 防守战优先：事件与战役类型同源，只要有一边说它在防守就按防守说——
+// 把「正在挨打」写成「解放战役进行中」是最容易让人误判的一句话。
+func campaignKind(p hd2.Planet, campaigns []hd2.Campaign) int {
+	if p.Event != nil {
+		return campaignDefense
+	}
+	kind := campaignNone
+	for _, c := range campaigns {
+		if c.Planet.Index != p.Index {
+			continue
+		}
+		if c.Type == campaignTypeDefense {
+			return campaignDefense
+		}
+		kind = campaignLiberation
+	}
+	return kind
+}
+
+// dssDocked 判断民主空间站是不是停在这颗星球上。
+// 上游没给停靠星球（PlanetIndex 为 0）时不算停靠，避免「站停在编号 0 的星球上」这种假标签。
+func dssDocked(index int, stations []hd2.SpaceStation) bool {
+	for _, s := range stations {
+		if s.PlanetIndex != 0 && s.PlanetIndex == index {
+			return true
+		}
+	}
+	return false
+}
+
+// counterAttackSource 找「正在进攻这颗星球的星球」，返回它的展示名。
+//
+// 上游的 Planet.Attacking 是**发起方**字段：这颗星球正在进攻的目标编号。
+// 实测 Peacock（编号 216）的 attacking=[268]，而 268 正是当时被打的那颗；
+// 所以要反过来找「谁的 attacking 里含它」。多颗来源时取编号最小的那颗——
+// 同一份数据每次给出同一枚标签，不会因为遍历顺序变了就换一个名字。
+func counterAttackSource(index int, planets []hd2.Planet) (string, bool) {
+	found := false
+	best := hd2.Planet{}
+	for _, q := range planets {
+		if q.Index == index {
+			// 自己打自己不是有效情报（上游脏数据），跳过。
+			continue
+		}
+		hit := false
+		for _, target := range q.Attacking {
+			if target == index {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			continue
+		}
+		if !found || q.Index < best.Index {
+			best, found = q, true
+		}
+	}
+	if !found {
+		return "", false
+	}
+	return plugutil.PlanetDisplayName(best.Name), true
+}
+
+// taskValueTypePlanet 与 plugins/orders 的 valueTypePlanet 是同一个口径：
+// 上游任务用 valueType 12 携带星球索引，0 表示「不限星球」而不是编号 0 的星球。
+const taskValueTypePlanet = 12
+
+// isMOTarget 判断这颗星球是不是某条重要指令任务的目标。
+func isMOTarget(index int, assignments []hd2.Assignment) bool {
+	if index <= 0 {
+		return false
+	}
+	for _, assignment := range assignments {
+		for _, task := range assignment.Tasks {
+			target, ok := task.ValueOf(taskValueTypePlanet)
+			if ok && target != 0 && int(target) == index {
+				return true
+			}
+		}
+	}
+	return false
 }

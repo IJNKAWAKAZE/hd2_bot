@@ -84,18 +84,26 @@ func testDispatches() []hd2.Dispatch {
 }
 
 // testAssignments 返回两条重要指令：一条有截止时间、一条没有（用于验证排序把「未知」排最后）。
+// 第一条的任务是实测的上游形状：valueTypes 与 values 按下标对齐，阵营在 valueType 1、
+// 目标值在 valueType 3，进度数组与任务一一对应。
 func testAssignments() []hd2.Assignment {
 	deadline := testFetchedAt().Add(72 * time.Hour)
 	return []hd2.Assignment{
 		{ID: 2, Title: "没有截止时间的指令", Briefing: "上游没给 expiration。"},
 		{
-			ID:         1,
-			Title:      "清剿机器人",
-			Briefing:   "消灭 200,000,000 名机器人士兵。",
-			Tasks:      []hd2.Task{{Type: 1, Values: []int64{200000000}}},
-			Reward:     hd2.Reward{Type: 0, Amount: 400},
+			ID:       1,
+			Title:    "清剿机器人",
+			Briefing: "消灭 200,000,000 名机器人士兵。",
+			Tasks: []hd2.Task{{
+				Type:       3,
+				Values:     []int64{3, 0, 200000000, 0, 0, 0, 0, 0, 0, 0},
+				ValueTypes: []int{1, 2, 3, 4, 6, 5, 8, 9, 11, 12},
+			}},
+			// 奖励按实测形状给：主源 /assignments 只给 {type, amount}（没有 id32），
+			// 卡片按类别编号认成「勋章」，口径见 plugutil.RewardTypeName。
+			Reward:     hd2.Reward{Type: 1, Amount: 400},
 			Expiration: &deadline,
-			Progress:   []int64{1234567, 200000000},
+			Progress:   []int64{1234567},
 		},
 	}
 }
@@ -104,8 +112,10 @@ func testAssignments() []hd2.Assignment {
 type fakeService struct {
 	assignments    hd2.Result[[]hd2.Assignment]
 	dispatches     hd2.Result[[]hd2.Dispatch]
+	planets        hd2.Result[[]hd2.Planet]
 	assignmentsErr error
 	dispatchesErr  error
+	planetsErr     error
 }
 
 // Assignments 返回预先设定的结果。
@@ -116,6 +126,11 @@ func (f *fakeService) Assignments(context.Context) (hd2.Result[[]hd2.Assignment]
 // Dispatches 返回预先设定的结果。
 func (f *fakeService) Dispatches(context.Context) (hd2.Result[[]hd2.Dispatch], error) {
 	return f.dispatches, f.dispatchesErr
+}
+
+// Planets 返回预先设定的星球列表；只有任务里真的出现星球索引时它才会被调用。
+func (f *fakeService) Planets(context.Context) (hd2.Result[[]hd2.Planet], error) {
+	return f.planets, f.planetsErr
 }
 
 // runHandler 取出指定名字的处理器并执行。
@@ -447,18 +462,61 @@ func TestOrdersFallbackListsAssignmentLines(t *testing.T) {
 		"进行中：2 条",
 		"*清剿机器人*",
 		"消灭 200,000,000 名机器人士兵。",
-		"任务：类型 1（数值 200,000,000） ｜ 奖励：数量 400（类型 0）",
+		"任务：消灭机器人敌人",              // 任务名已解码：阵营来自 valueType 1
+		"1,234,567 / 200,000,000", // 「当前 / 目标」
+		"奖励：勋章 ×400",
 		"截止：2026\\-09\\-19 20:00",
-		"进度：1,234,567、200,000,000",
 		"*没有截止时间的指令*",
 		"截止：未知",
-		"任务与奖励的类型、数值含义上游未公布",
 		"数据时间：2026\\-09\\-16 20:00:00",
 	}
 	for _, want := range wants {
 		if !strings.Contains(s.Replies[0], want) {
 			t.Errorf("回退文本缺少 %q：\n%s", want, s.Replies[0])
 		}
+	}
+	// 百分比里的点号要按 MarkdownV2 转义，否则整条消息会被 Telegram 拒收。
+	if !strings.Contains(s.Replies[0], "0\\.6%") {
+		t.Errorf("回退文本里的百分比未转义：\n%s", s.Replies[0])
+	}
+}
+
+// TestOrdersAssignmentsResolvesPlanetNames 校验带星球索引的任务会把星球名画进卡片：
+// 任务里的星球是索引（valueType 12），要靠一次星球查询翻成名字。
+// 星球查询失败不算 /assignments 失败——指令照常出图，这些任务退回「星球 #N」。
+func TestOrdersAssignmentsResolvesPlanetNames(t *testing.T) {
+	list := []hd2.Assignment{{
+		ID:    1,
+		Title: "解放麦拉芬蒙河",
+		Tasks: []hd2.Task{{
+			Type:       11,
+			Values:     []int64{0, 0, 0, 0, 0, 0, 0, 0, 0, 5},
+			ValueTypes: []int{1, 2, 3, 4, 6, 5, 8, 9, 11, 12},
+		}},
+	}}
+	svc := &fakeService{
+		assignments: hd2.Result[[]hd2.Assignment]{Value: list, FetchedAt: testFetchedAt()},
+		planets: hd2.Result[[]hd2.Planet]{
+			Value:     []hd2.Planet{{Index: 5, Name: "Malevelon Creek"}},
+			FetchedAt: testFetchedAt(),
+		},
+	}
+	s := &plugtest.Sender{GroupID: -100}
+	if err := runHandler(t, "assignments", s, svc, plugtest.FailRenderer(), plugtest.MessageUpdate(-100, "/assignments")); err != nil {
+		t.Fatalf("执行 /assignments 失败：%v", err)
+	}
+	if !strings.Contains(s.Replies[0], "星球：麦拉芬蒙河") {
+		t.Errorf("任务里的星球索引应翻成简中星球名：\n%s", s.Replies[0])
+	}
+
+	// 星球查询失败：指令照常出图，只是星球显示编号（编号里的 # 会被 MarkdownV2 转义）。
+	svc.planetsErr = errors.New("星球接口挂了")
+	fallen := &plugtest.Sender{GroupID: -100}
+	if err := runHandler(t, "assignments", fallen, svc, plugtest.FailRenderer(), plugtest.MessageUpdate(-100, "/assignments")); err != nil {
+		t.Fatalf("星球查询失败不该让 /assignments 失败：%v", err)
+	}
+	if !strings.Contains(fallen.Replies[0], "星球 \\#5") {
+		t.Errorf("取不到星球数据时应退回编号：\n%s", fallen.Replies[0])
 	}
 }
 
@@ -546,8 +604,8 @@ func TestOrdersCardsSmokeWithRealBrowser(t *testing.T) {
 		card render.Card
 		full bool // 正文必须一条都没被截断（真实内容完整进卡）
 	}{
-		{"hd2_assignments_card.png", render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(testAssignments(), testFetchedAt(), true)}, false},
-		{"hd2_assignments_empty_card.png", render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(nil, testFetchedAt(), false)}, false},
+		{"hd2_assignments_card.png", render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(testAssignments(), testFetchedAt(), true, nil)}, false},
+		{"hd2_assignments_empty_card.png", render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(nil, testFetchedAt(), false, nil)}, false},
 		{"hd2_dispatches_card.png", render.Card{Name: dispatchesCardName, Data: BuildDispatchesCard(testDispatches(), defaultDispatchCount, testFetchedAt(), false)}, false},
 		{"hd2_dispatches_real_3_card.png", render.Card{Name: dispatchesCardName, Data: BuildDispatchesCard(real, defaultDispatchCount, testFetchedAt(), false)}, true},
 		{"hd2_dispatches_10_card.png", render.Card{Name: dispatchesCardName, Data: BuildDispatchesCard(worst, maxDispatchCount, testFetchedAt(), false)}, false},

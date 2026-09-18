@@ -39,8 +39,8 @@ func FormatPlanetsText(summary PlanetsSummary, fetchedAt time.Time, stale bool) 
 }
 
 // FormatPlanetText 把单颗星球渲染成 MarkdownV2 文本，用于渲染失败或未启用渲染时的回退。
-// 直接吃卡片视图模型（BuildLocalizedPlanetCard 的产物）：字段、译文、截断与数据时间两条路径共用同一份，
-// 顺序与卡片一致（卡面头 → 进度条 → 星球情报 → 环境危害 → 星球事件），
+// 直接吃卡片视图模型（BuildLocalizedPlanetCard ＋ FillPlanetExtras 的产物）：字段、译文、截断与数据时间两条路径共用同一份，
+// 顺序与卡片一致（卡面头 → 进度条 → 战略情报分析 → 星球情报 → 环境危害 → 行动变量 → 兴趣点 → 星球事件），
 // 不会出现「图片里是中文、文本里是英文」或两边截断长度不同的情况。
 func FormatPlanetText(card PlanetCard) string {
 	var b strings.Builder
@@ -51,6 +51,10 @@ func FormatPlanetText(card PlanetCard) string {
 	}
 	fmt.Fprintf(&b, "派系：%s ｜ 在线士兵：%s\n", bot.Escape(card.Faction), bot.Escape(card.PlayerCount))
 	fmt.Fprintf(&b, "编号：%s ｜ 分区：%s\n", bot.Escape(card.Index), bot.Escape(card.Sector))
+	// 战略情报分析：与卡片同一份 Intel 行（解放度 / 抵抗度 / 星球血量 / 玩家数量），照抄标签与数值。
+	for _, row := range card.Intel {
+		fmt.Fprintf(&b, "%s：%s\n", bot.Escape(row.Label), bot.Escape(row.Value))
+	}
 	fmt.Fprintf(&b, "生物群系：%s ｜ 危害：%s\n", bot.Escape(card.Biome), bot.Escape(card.Hazards))
 	if card.BiomeDesc != "" {
 		fmt.Fprintf(&b, "群系说明：%s\n", bot.Escape(card.BiomeDesc))
@@ -66,7 +70,8 @@ func FormatPlanetText(card PlanetCard) string {
 		fmt.Fprintf(&b, "%s\n", bot.Escape(card.EnvNote))
 	}
 	fmt.Fprintf(&b, "控制方：%s（初始 %s）\n", bot.Escape(card.Owner), bot.Escape(card.InitialOwner))
-	fmt.Fprintf(&b, "血量：%s ｜ 每秒回复：%s\n", bot.Escape(card.HealthText), bot.Escape(card.Regen))
+	// 血量已经进了上面的「星球血量」一行，这里只留每秒回复，不再重复同一个数字。
+	fmt.Fprintf(&b, "每秒回复：%s\n", bot.Escape(card.Regen))
 	if card.BarLabel != "" {
 		fmt.Fprintf(&b, "%s：%s\n", bot.Escape(card.BarLabel), bot.Escape(card.BarText))
 	}
@@ -75,6 +80,28 @@ func FormatPlanetText(card PlanetCard) string {
 	}
 	if card.Attacking != "" {
 		fmt.Fprintf(&b, "进攻目标：%s\n", bot.Escape(card.Attacking))
+	}
+	// 行动变量与兴趣点：与卡片同一份视图模型。没有行动变量时写 EffectNote——
+	// 它区分「补充源说这颗星球没有」与「补充源没取到」，这两句话在文本里同样不能混。
+	if len(card.EffectChips) == 0 {
+		if card.EffectNote != "" {
+			fmt.Fprintf(&b, "行动变量：%s\n", bot.Escape(card.EffectNote))
+		}
+	} else {
+		for _, chip := range card.EffectChips {
+			if chip.Description == "" {
+				fmt.Fprintf(&b, "行动变量：%s\n", bot.Escape(chip.Name))
+				continue
+			}
+			fmt.Fprintf(&b, "行动变量：%s ｜ %s\n", bot.Escape(chip.Name), bot.Escape(chip.Description))
+		}
+	}
+	if len(card.POIs) > 0 {
+		texts := make([]string, 0, len(card.POIs))
+		for _, poi := range card.POIs {
+			texts = append(texts, bot.Escape(poi.Text))
+		}
+		fmt.Fprintf(&b, "兴趣点：%s\n", strings.Join(texts, " ｜ "))
 	}
 	if card.Event != nil {
 		fmt.Fprintf(&b, "星球事件：进攻方 %s\n", bot.Escape(card.Event.Faction))

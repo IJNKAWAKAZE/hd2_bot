@@ -66,15 +66,27 @@ type DispatchesCard struct {
 	Items         []DispatchItem // 已按发布时间倒序并截断
 }
 
+// AssignmentTaskItem 是卡片上的一条任务：字段都已格式化，模板只排版。
+// 任务名与数值都由 decode.go 解码（含阵营、目标值与星球名），这里只负责承载。
+type AssignmentTaskItem struct {
+	Title   string  // 已解码的任务名，例如「消灭终结族敌人 · 星球：麦拉芬蒙河」
+	Numbers string  // 「149,671,345 / 1,500,000,000（10.0%）」；没有可展示的数值时为空
+	Percent float64 // 进度百分比（0-100），与 Numbers 里的百分比同源
+	Bar     bool    // 是否画进度条：只有「有当前值也有目标值」时才画
+}
+
+// PlanetNames 是「星球索引 → 星球原名」的查表，索引来自任务里的 valueType 12。
+// nil 表示本次没拿到星球数据：任务里的星球索引会退回「星球 #N」，而不是把整条任务丢掉。
+type PlanetNames map[int]string
+
 // AssignmentItem 是一条重要指令。（实测 /assignments 返回 []），
 // 所以字段设计以「上游真给了数据也能看」为准，不为了占位卡做额外假设。
 type AssignmentItem struct {
-	Title      string // 标题；上游没给时「未命名指令」
-	Briefing   string // 简报（缺省时退回 description），已清理标记并截断
-	Tasks      string // 任务明细；上游只给枚举值与数值，含义未公布，按「类型 N（数值 X）」展示
-	Reward     string // 奖励；上游只给类型与数量，含义未公布
-	Expiration string // 截止时间（展示时区），上游没给时「未知」
-	Progress   string // 进度数值；没有时不显示这一行
+	Title      string               // 标题；上游没给时「未命名指令」
+	Briefing   string               // 简报（缺省时退回 description），已清理标记并截断
+	Tasks      []AssignmentTaskItem // 任务明细，已解码；表里没有的枚举仍按原值展示
+	Reward     string               // 奖励；按 id32 认货币（认不出时退回上游原值），见 rewardText
+	Expiration string               // 截止时间（展示时区），上游没给时「未知」
 }
 
 // AssignmentsCard 是 templates/assignments.tmpl 的视图模型。
@@ -83,7 +95,6 @@ type AssignmentsCard struct {
 	Count string           // 进行中的指令条数
 	Empty bool             // 上游返回空列表：渲染占位卡，这不是错误
 	Items []AssignmentItem // 已按截止时间升序（没有截止时间的排在最后）
-	Notes []string         // 卡片底部的口径说明（例如「枚举含义上游未公布」）
 }
 
 // dispatchRunesPerItem 返回本次每条简报允许的正文长度上限：整卡正文预算按条数摊分，
@@ -252,11 +263,10 @@ func countTruncated(items []DispatchItem) int {
 	return n
 }
 
-// BuildAssignmentsCard 把重要指令转成卡片视图模型。
-// list 为空时返回 Empty 卡片（渲染「暂无重要指令」占位卡），而不是报错：
-// 上游实测当前就是返回 []，这是正常状态。
-func BuildTranslatedAssignments(ctx context.Context, list []hd2.Assignment, fetchedAt time.Time, stale bool, trans translate.Translator) AssignmentsCard {
-	card := BuildAssignmentsCard(list, fetchedAt, stale)
+// BuildTranslatedAssignments 在卡片视图模型上补一层翻译：只翻标题与简报这两段上游原文，
+// 任务明细是解码出来的中文，不进翻译层。
+func BuildTranslatedAssignments(ctx context.Context, list []hd2.Assignment, fetchedAt time.Time, stale bool, trans translate.Translator, planets PlanetNames) AssignmentsCard {
+	card := BuildAssignmentsCard(list, fetchedAt, stale, planets)
 	if trans == nil || card.Empty {
 		return card
 	}
@@ -281,7 +291,11 @@ func BuildTranslatedAssignments(ctx context.Context, list []hd2.Assignment, fetc
 	return card
 }
 
-func BuildAssignmentsCard(list []hd2.Assignment, fetchedAt time.Time, stale bool) AssignmentsCard {
+// BuildAssignmentsCard 把重要指令转成卡片视图模型。
+// list 为空时返回 Empty 卡片（渲染「暂无重要指令」占位卡），而不是报错：
+// 上游实测当前就是返回 []，这是正常状态。
+// planets 是星球索引 → 星球原名，nil 表示本次没取星球数据（任务里的星球索引会显示成「星球 #N」）。
+func BuildAssignmentsCard(list []hd2.Assignment, fetchedAt time.Time, stale bool, planets PlanetNames) AssignmentsCard {
 	ordered := make([]hd2.Assignment, len(list))
 	copy(ordered, list)
 	// 按截止时间升序（快过期的排前面），没有截止时间的排在最后：群里最关心的是「还剩多久」。
@@ -302,7 +316,7 @@ func BuildAssignmentsCard(list []hd2.Assignment, fetchedAt time.Time, stale bool
 	loc := fetchedAt.Location()
 	items := make([]AssignmentItem, 0, len(ordered))
 	for _, a := range ordered {
-		items = append(items, buildAssignmentItem(a, loc))
+		items = append(items, buildAssignmentItem(a, loc, planets))
 	}
 
 	return AssignmentsCard{
@@ -316,62 +330,43 @@ func BuildAssignmentsCard(list []hd2.Assignment, fetchedAt time.Time, stale bool
 		Count: plugutil.FormatInt(int64(len(items))),
 		Empty: len(items) == 0,
 		Items: items,
-		// 上游只给枚举数字，不给含义：与其猜一个「击杀 2 亿机器人」的说法，不如把口径写在卡片上。
-		Notes: []string{"任务与奖励的类型、数值含义上游未公布，卡片按原值展示，不做翻译。"},
 	}
 }
 
 // buildAssignmentItem 把一条指令转成卡片上的一块内容。
-func buildAssignmentItem(a hd2.Assignment, loc *time.Location) AssignmentItem {
-	// 这里刻意丢掉 truncateRunes 的截断标志（不往 card.Notes 里加「简报已截断」）：
+func buildAssignmentItem(a hd2.Assignment, loc *time.Location, planets PlanetNames) AssignmentItem {
+	// 这里刻意丢掉 truncateRunes 的截断标志（卡片底部不加「简报已截断」这类说明）：
 	// 指令简报本来就只有一两句话（实测远短于 maxAssignmentRunes），截断属于理论路径；
-	// 为它加一句说明会让每张指令卡片都多一行小字，收益不抵噪声。真要提示再改成 Notes。
+	// 为它加一句说明会让每张指令卡片都多一行小字，收益不抵噪声。真要提示再单独加字段。
 	briefing, _ := truncateRunes(translate.CleanGameText(plugutil.DefaultText(a.Briefing, a.Description)), maxAssignmentRunes)
 	return AssignmentItem{
-		Title:      plugutil.DefaultText(a.Title, "未命名指令"),
-		Briefing:   plugutil.DefaultText(briefing, plugutil.DashText),
-		Tasks:      tasksText(a.Tasks),
+		Title:    plugutil.DefaultText(a.Title, "未命名指令"),
+		Briefing: plugutil.DefaultText(briefing, plugutil.DashText),
+		// 任务与进度一起交给 decode.go：进度数组与任务按下标一一对应，两处分别取值容易错位。
+		Tasks:      decodeAssignmentTasks(a.Tasks, a.Progress, planets),
 		Reward:     rewardText(a.Reward),
 		Expiration: expirationText(a.Expiration, loc),
-		Progress:   numbersText(a.Progress),
 	}
 }
 
-// tasksText 拼任务明细。上游 Task 只有 type/values/valueTypes 三个数字字段，含义未公布，
-// 所以只写「类型 N（数值 X）」：不把 type=1 猜成「击杀」。
-func tasksText(tasks []hd2.Task) string {
-	if len(tasks) == 0 {
-		return plugutil.DashText
-	}
-	parts := make([]string, 0, len(tasks))
-	for _, task := range tasks {
-		if len(task.Values) == 0 {
-			parts = append(parts, fmt.Sprintf("类型 %d", task.Type))
-			continue
-		}
-		parts = append(parts, fmt.Sprintf("类型 %d（数值 %s）", task.Type, numbersText(task.Values)))
-	}
-	return strings.Join(parts, "、")
-}
-
-// rewardText 拼奖励。同上：Reward 只有 type/amount/id32，含义未公布，只给原值。
+// rewardText 拼奖励，认奖励分两级：
+//   - id32 是奖励物品本身的编号，社区奖励表按它对照（补充源才给这个字段），认得出来最准；
+//   - 主源 /assignments 的 reward 实测只给 {type, amount}（没有 id32），这时按类别编号认
+//     （对照表见 plugutil.RewardTypeName，只收录有把握的那几种）。
+//
+// 两级都认不出时退回原值（数量 + 类型），至少让人知道上游给了什么；不把数字猜成某个具体奖励。
 func rewardText(reward hd2.Reward) string {
 	if reward.Amount == 0 && reward.Type == 0 && reward.ID32 == 0 {
 		return plugutil.DashText // 上游没有给出奖励
 	}
-	return fmt.Sprintf("数量 %s（类型 %d）", plugutil.FormatInt(int64(reward.Amount)), reward.Type)
-}
-
-// numbersText 把一组数字拼成「1、2」，空集合返回空串。
-func numbersText(values []int64) string {
-	if len(values) == 0 {
-		return ""
+	amount := plugutil.FormatInt(int64(reward.Amount))
+	if name, ok := plugutil.CurrencyName(reward.ID32); ok {
+		return fmt.Sprintf("%s ×%s", name, amount)
 	}
-	parts := make([]string, 0, len(values))
-	for _, v := range values {
-		parts = append(parts, plugutil.FormatInt(v))
+	if name, ok := plugutil.RewardTypeName(reward.Type); ok {
+		return fmt.Sprintf("%s ×%s", name, amount)
 	}
-	return strings.Join(parts, "、")
+	return fmt.Sprintf("数量 %s（类型 %d）", amount, reward.Type)
 }
 
 // expirationText 格式化截止时间；上游没给（nil 或零值）时显示「未知」。

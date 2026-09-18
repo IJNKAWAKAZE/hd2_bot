@@ -210,7 +210,7 @@ func TestBuildDispatchesCardClampsCount(t *testing.T) {
 
 // TestBuildAssignmentsCardFields 校验指令卡片的字段格式化与排序（快过期的在前，没截止时间的最后）。
 func TestBuildAssignmentsCardFields(t *testing.T) {
-	card := BuildAssignmentsCard(testAssignments(), testFetchedAt(), false)
+	card := BuildAssignmentsCard(testAssignments(), testFetchedAt(), false, nil)
 
 	if card.Count != "2" || card.Empty {
 		t.Fatalf("条数/空标记错误：%+v", card)
@@ -225,26 +225,57 @@ func TestBuildAssignmentsCardFields(t *testing.T) {
 	if first.Expiration != "2026-09-19 20:00" {
 		t.Errorf("截止时间应按展示时区格式化，实际 %q", first.Expiration)
 	}
-	if !strings.Contains(first.Tasks, "类型 1") || !strings.Contains(first.Tasks, "200,000,000") {
-		t.Errorf("任务应给出枚举原值与数值，实际 %q", first.Tasks)
+	if len(first.Tasks) != 1 {
+		t.Fatalf("样本指令应有 1 条任务，实际 %d 条", len(first.Tasks))
 	}
-	if first.Reward != "数量 400（类型 0）" {
-		t.Errorf("奖励格式错误：%q", first.Reward)
+	// 任务不再写成「类型 3（数值 …）」：阵营进任务名，目标值与当前进度一起进数值。
+	if first.Tasks[0].Title != "消灭机器人敌人" {
+		t.Errorf("任务名应解出阵营，实际 %q", first.Tasks[0].Title)
 	}
-	if first.Progress != "1,234,567、200,000,000" {
-		t.Errorf("进度格式错误：%q", first.Progress)
+	if first.Tasks[0].Numbers != "1,234,567 / 200,000,000（0.6%）" {
+		t.Errorf("任务数值应为「当前 / 目标（百分比）」，实际 %q", first.Tasks[0].Numbers)
+	}
+	if !first.Tasks[0].Bar || first.Tasks[0].Percent != 0.6 {
+		t.Errorf("有当前值也有目标值时应画进度条，实际 bar=%v percent=%v", first.Tasks[0].Bar, first.Tasks[0].Percent)
+	}
+	if first.Reward != "勋章 ×400" {
+		t.Errorf("奖励应按类别编号认成货币名（主源不给 id32），实际 %q", first.Reward)
+	}
+	if len(card.Items[1].Tasks) != 0 {
+		t.Errorf("上游没给任务时不该凭空造出任务：%+v", card.Items[1].Tasks)
 	}
 	if card.Items[1].Expiration != "未知" {
 		t.Errorf("没有截止时间应显示「未知」，实际 %q", card.Items[1].Expiration)
 	}
-	if len(card.Notes) == 0 {
-		t.Error("卡片应说明「枚举含义上游未公布」")
+}
+
+// TestRewardText 校验奖励文案：先按 id32 认货币名（补充源才给这个字段），没有 id32 时按类别编号认，
+// 两级都认不出才退回上游原值，完全没给时写「—」。
+// 之前这里印的是「数量 400（类型 0）」——「类型 0」是上游的奖励类别数字，群里没人读得懂。
+func TestRewardText(t *testing.T) {
+	cases := []struct {
+		name   string
+		reward hd2.Reward
+		want   string
+	}{
+		// 主源实测形态：只有 type/amount（2026-09-18 响应 reward = {type: 1, amount: 40}）。
+		{"主源只给类别时认勋章", hd2.Reward{Type: 1, Amount: 40}, "勋章 ×40"},
+		{"按 id32 认勋章", hd2.Reward{Type: 1, Amount: 40, ID32: 897894480}, "勋章 ×40"},
+		{"按 id32 认样本", hd2.Reward{Type: 1, Amount: 250, ID32: 2985106497}, "稀有样本 ×250"},
+		{"没收录的类别退回原值", hd2.Reward{Type: 7, Amount: 3}, "数量 3（类型 7）"},
+		{"认不出的 id32 退回原值", hd2.Reward{Type: 7, Amount: 3, ID32: 424242}, "数量 3（类型 7）"},
+		{"上游没给奖励", hd2.Reward{}, plugutil.DashText},
+	}
+	for _, c := range cases {
+		if got := rewardText(c.reward); got != c.want {
+			t.Errorf("%s：rewardText = %q，期望 %q", c.name, got, c.want)
+		}
 	}
 }
 
 // TestBuildAssignmentsCardEmpty 校验空列表生成占位卡数据，而不是空指针或错误。
 func TestBuildAssignmentsCardEmpty(t *testing.T) {
-	card := BuildAssignmentsCard(nil, testFetchedAt(), false)
+	card := BuildAssignmentsCard(nil, testFetchedAt(), false, nil)
 	if !card.Empty {
 		t.Error("空列表应标记 Empty")
 	}
@@ -296,12 +327,17 @@ func TestOrdersCardHTML(t *testing.T) {
 
 	assignments, err := render.HTML(render.Card{
 		Name: assignmentsCardName,
-		Data: BuildAssignmentsCard(testAssignments(), testFetchedAt(), true),
+		Data: BuildAssignmentsCard(testAssignments(), testFetchedAt(), true, nil),
 	})
 	if err != nil {
 		t.Fatalf("渲染指令卡片 HTML 失败：%v", err)
 	}
-	for _, want := range []string{"重要指令", "清剿机器人", "数量 400（类型 0）", "2026-09-19 20:00", "数据可能已过期"} {
+	for _, want := range []string{
+		"重要指令", "清剿机器人",
+		"消灭机器人敌人", "1,234,567 / 200,000,000（0.6%）", // 任务已解码，不再是「类型 3（数值 …）」
+		`class="bar__fill"`, // 有当前值也有目标值：卡片上要有一条进度条
+		"勋章 ×400", "2026-09-19 20:00", "数据可能已过期",
+	} {
 		if !strings.Contains(assignments, want) {
 			t.Errorf("指令卡片 HTML 缺少 %q", want)
 		}
@@ -313,7 +349,7 @@ func TestOrdersCardHTML(t *testing.T) {
 func TestOrdersCardHTMLEscapesUpstreamText(t *testing.T) {
 	injection := `<script>alert(1)</script>`
 	list := []hd2.Assignment{{ID: 1, Title: injection, Briefing: "正文"}}
-	html, err := render.HTML(render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(list, testFetchedAt(), false)})
+	html, err := render.HTML(render.Card{Name: assignmentsCardName, Data: BuildAssignmentsCard(list, testFetchedAt(), false, nil)})
 	if err != nil {
 		t.Fatalf("渲染指令卡片 HTML 失败：%v", err)
 	}
@@ -427,11 +463,11 @@ func TestDispatchRunesTerminalLimitBoundary(t *testing.T) {
 // TestBuildAssignmentBriefingTerminalLimitBoundary 校验指令简报的终局防线边界：
 // 正好 1500 字不截、1501 字才截。真实上游简报只有两百多字，这条防线只为异常数据存在。
 func TestBuildAssignmentBriefingTerminalLimitBoundary(t *testing.T) {
-	exact := buildAssignmentItem(hd2.Assignment{Briefing: strings.Repeat("字", 1500)}, testZone())
+	exact := buildAssignmentItem(hd2.Assignment{Briefing: strings.Repeat("字", 1500)}, testZone(), nil)
 	if got := len([]rune(exact.Briefing)); got != 1500 {
 		t.Fatalf("正好 1500 字的指令简报应原样保留，实际 %d 字", got)
 	}
-	over := []rune(buildAssignmentItem(hd2.Assignment{Briefing: strings.Repeat("字", 1501)}, testZone()).Briefing)
+	over := []rune(buildAssignmentItem(hd2.Assignment{Briefing: strings.Repeat("字", 1501)}, testZone(), nil).Briefing)
 	if len(over) != 1501 || over[len(over)-1] != 0x2026 {
 		t.Fatalf("1501 字的指令简报应截到 1500 字并补省略号，实际 %d 字", len(over))
 	}

@@ -257,6 +257,25 @@ type Task struct {
 	ValueTypes []int   `json:"valueTypes"`
 }
 
+// ValueOf 取这条任务里某个 valueType 对应的值。
+// 上游的 values 与 valueTypes 是两个等长数组，靠下标对齐（valueTypes[i] 说明 values[i] 是什么）；
+// 长度不一致（上游抽风）时取不到就返回 false，绝不猜一个位置。
+//
+// 这是全项目唯一的对位实现：plugins/orders 与 plugins/planets 都调它，
+// 免得两边各写一份、其中一份哪天忘了检查下标。
+func (t Task) ValueOf(valueType int) (int64, bool) {
+	for i, vt := range t.ValueTypes {
+		if vt != valueType {
+			continue
+		}
+		if i >= len(t.Values) {
+			return 0, false
+		}
+		return t.Values[i], true
+	}
+	return 0, false
+}
+
 // Reward 重要指令奖励。
 type Reward struct {
 	Type   int   `json:"type"`
@@ -300,8 +319,13 @@ type SpaceStation struct {
 	// PlanetIndex 是空间站当前所在星球编号；上游实测该字段可能是问号或缺失，此时为 0（0 也表示「没有位置信息」）。
 	// 它没有 json tag，改由 UnmarshalJSON 容错解析：实测响应里 planet 是字符串 "?"，
 	// 直接声明成 int 会让整批空间站解码失败，而推送的变化检测只关心这个值变没变。
-	PlanetIndex     int              `json:"-"`
-	ElectionEnd     *time.Time       `json:"electionEnd"`
+	PlanetIndex int        `json:"-"`
+	ElectionEnd *time.Time `json:"electionEnd"`
+	// PlanetName / PlanetSector 是停靠星球的英文原名与星区，只在 planet 是完整对象形态时才有
+	// （实测 /api/v2/space-stations 会把整颗星球嵌进来）。卡片用它们写「当前停靠」一行；
+	// 取不到时留空，由卡片写「位置未知」，而不是拿编号冒充名字。
+	PlanetName      string           `json:"-"`
+	PlanetSector    string           `json:"-"`
 	TacticalActions []TacticalAction `json:"tacticalActions"`
 }
 
@@ -322,7 +346,7 @@ func (s *SpaceStation) UnmarshalJSON(b []byte) error {
 		return fmt.Errorf("electionEnd %w", err)
 	}
 	s.ElectionEnd = electionEnd
-	s.PlanetIndex = flexibleIndex(raw.Planet)
+	s.PlanetIndex, s.PlanetName, s.PlanetSector = flexiblePlanet(raw.Planet)
 	return nil
 }
 
@@ -337,48 +361,103 @@ func (s *SpaceStation) UnmarshalJSON(b []byte) error {
 // 与 flexibleTime 的区别：时间脏了必须报错（让上层走快照降级），因为展示一个错误时间会误导人；
 // 而空间站的 planet 认不出来只等于「没有位置信息」（0），把它当错误会让整批空间站解码失败。
 func flexibleIndex(raw json.RawMessage) int {
+	index, _, _ := flexiblePlanet(raw)
+	return index
+}
+
+// flexiblePlanet 解析空间站的 planet 字段，返回编号、星球英文原名与星区。
+//
+// 上游这个字段出现过三种形态：数字、数字字符串，以及完整星球对象
+// （实测 2026-09-18 的 /api/v2/space-stations 给的是对象，带 index / name / sector）。
+// 只有对象形态才有名字与星区，另外两种一律留空——卡片据此写「位置未知」，而不是拿编号冒充名字。
+// 认不出来不是错误：那只是「没有位置信息」，详见 flexibleIndex 的注释。
+func flexiblePlanet(raw json.RawMessage) (int, string, string) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
-		return 0
+		return 0, "", ""
 	}
 	switch trimmed[0] {
+	case '{':
+		var obj struct {
+			Index  json.RawMessage `json:"index"`
+			Name   string          `json:"name"`
+			Sector string          `json:"sector"`
+		}
+		if err := json.Unmarshal(trimmed, &obj); err != nil {
+			return 0, "", ""
+		}
+		// index 本身可能又是数字字符串，递归复用同一套解析；嵌套深度由 encoding/json 的上限兜住。
+		return flexibleIndex(obj.Index), strings.TrimSpace(obj.Name), strings.TrimSpace(obj.Sector)
 	case '"':
 		var text string
 		if err := json.Unmarshal(trimmed, &text); err != nil {
-			return 0
+			return 0, "", ""
 		}
 		value, err := strconv.Atoi(strings.TrimSpace(text))
 		if err != nil {
-			return 0
+			return 0, "", ""
 		}
-		return value
-	case '{':
-		// 对象形态只认 index 字段；它本身可能又是数字字符串，递归复用上面的解析。
-		// 嵌套深度由 encoding/json 自身的上限兜住（脏数据最多让它一路返回 0）。
-		var obj struct {
-			Index json.RawMessage `json:"index"`
-		}
-		if err := json.Unmarshal(trimmed, &obj); err != nil {
-			return 0
-		}
-		return flexibleIndex(obj.Index)
+		return value, "", ""
 	}
 	var value int
 	if err := json.Unmarshal(trimmed, &value); err == nil {
-		return value
+		return value, "", ""
 	}
 	var f float64
 	if err := json.Unmarshal(trimmed, &f); err == nil {
-		return int(f)
+		return int(f), "", ""
 	}
-	return 0
+	return 0, "", ""
 }
 
 // TacticalAction 空间站上的战术行动。
+//
+// 字段按上游 /api/v2/space-stations 的实测响应（2026-09-18）补齐：
+// 卡片要画「募捐中 / 已激活 / 冷却中」的阶段、募捐进度与冷却剩余，
+// 这些都只能从下面这几个字段来，缺一个就画不出参考站那一栏。
 type TacticalAction struct {
 	ID32   int64  `json:"id32"`
 	Name   string `json:"name"`
 	Status int    `json:"status"`
+	// Description / StrategicDescription 是上游给的行动说明；strategicDescription 里带
+	// <span data-ah="1">…</span> 标记，展示前要清洗（复用 translate.CleanGameText）。
+	Description          string `json:"description"`
+	StrategicDescription string `json:"strategicDescription"`
+	// EffectIDs 是这项行动关联的效果编号；上游实测「飞鹰风暴 = 1209/1212/1216」这类组合。
+	EffectIDs []int `json:"effectIds"`
+	// Costs 是募捐进度，上游实测每项行动只给一条。
+	Costs []TacticalCost `json:"costs"`
+	// StatusExpire 的含义随 Status 变：status=2（已激活）时是本次行动结束时刻，
+	// status=3（冷却中）时是冷却结束时刻。上游可能给空串，故走容错解析（见 UnmarshalJSON）。
+	StatusExpire *time.Time `json:"-"`
+}
+
+// TacticalCost 是战术行动的募捐进度（上游字段名照抄，含它自己的拼写）。
+type TacticalCost struct {
+	TargetValue              float64 `json:"targetValue"`
+	CurrentValue             float64 `json:"currentValue"`
+	DeltaPerSecond           float64 `json:"deltaPerSecond"`
+	MaxDonationAmmount       float64 `json:"maxDonationAmmount"`
+	MaxDonationPeriodSeconds float64 `json:"maxDonationPeriodSeconds"`
+}
+
+// UnmarshalJSON 把 statusExpire 走容错解析：空串或 null 表示上游没有给值，取 nil；格式非法则报错。
+// 与 Assignment.expiration 同一套口径：坏时间字段不该让整批空间站解码失败。
+func (a *TacticalAction) UnmarshalJSON(b []byte) error {
+	type actionAlias TacticalAction
+	raw := struct {
+		*actionAlias
+		StatusExpire json.RawMessage `json:"statusExpire"`
+	}{actionAlias: (*actionAlias)(a)}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return fmt.Errorf("tacticalAction 字段格式非法：%w", err)
+	}
+	expire, err := flexibleTimePtr(raw.StatusExpire)
+	if err != nil {
+		return fmt.Errorf("statusExpire %w", err)
+	}
+	a.StatusExpire = expire
+	return nil
 }
 
 // DecodeWar 解析战况响应。

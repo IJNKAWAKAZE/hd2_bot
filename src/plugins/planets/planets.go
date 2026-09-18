@@ -64,6 +64,17 @@ type PlanetsService interface {
 	Planets(ctx context.Context) (hd2.Result[[]hd2.Planet], error)
 	// War 只用来取「在线士兵」一行；拿不到时总览把这一项显示成「—」。
 	War(ctx context.Context) (hd2.Result[*hd2.War], error)
+
+	// 下面四项只服务 /planet 的兴趣点与行动变量（用户 2026-09-18 要求）：
+	// 随便哪一项取不到都不影响单星球卡出图，缺的只是对应的标签或写一句「暂不可用」。
+	// Campaigns 返回进行中的战役。
+	Campaigns(ctx context.Context) (hd2.Result[[]hd2.Campaign], error)
+	// Assignments 返回重要指令（用来判断这颗星球是不是指令目标）。
+	Assignments(ctx context.Context) (hd2.Result[[]hd2.Assignment], error)
+	// Stations 返回民主空间站（用来判断空间站是不是停在这颗星球上）。
+	Stations(ctx context.Context) (hd2.Result[[]hd2.SpaceStation], error)
+	// PlanetEffects 返回各星球的行动变量；它来自补充源，未配置或取不到时返回错误。
+	PlanetEffects(ctx context.Context) (hd2.Result[[]hd2.PlanetEffect], error)
 }
 
 // Handlers 返回本插件提供的指令。
@@ -183,8 +194,11 @@ func (h *handler) planet(update tgbotapi.Update) error {
 	}
 
 	// 卡片与文本回退共用这一份视图模型：渲染失败时回退的文本与图片口径一致。
+	// 补充数据（战役 / 重要指令 / 空间站 / 行动变量）先取，再一次性填进卡片：
+	// 它们只影响「行动变量」与「兴趣点」两块，取不到不会让整张卡失败。
 	fetchedAt := res.FetchedAt.In(h.display)
-	card := BuildLocalizedPlanetCard(ctx, planet, fetchedAt, res.Stale, h.trans)
+	extras := h.planetExtras(ctx, chatID, res.Value)
+	card := FillPlanetExtras(BuildLocalizedPlanetCard(ctx, planet, fetchedAt, res.Stale, h.trans), planet, extras)
 	// 翻译可能耗尽取数上下文；渲染使用独立、有上限的预算，仍保留已得到的译文。
 	renderCtx, renderCancel := context.WithTimeout(context.Background(), plugutil.Timeout)
 	defer renderCancel()
@@ -212,6 +226,41 @@ func (h *handler) warOrNil(ctx context.Context, chatID int64) *hd2.War {
 		return nil
 	}
 	return res.Value
+}
+
+// planetExtras 取单星球卡要用的补充数据：战役、重要指令、空间站停靠与行动变量
+// （再加一份全量星球列表，用来找「敌军反攻」是从哪颗星球来的）。
+//
+// 四项数据各自独立：任何一项失败只记一条中文日志并留空，卡片少几枚兴趣点标签而已。
+// 三项主源数据都走领域层缓存（TTL 见 config.cache），所以常态下一次 /planet 最多多打三个请求；
+// 补充源另有一个限流器，不占主源的额度（见 main.go 的注释）。
+// 刻意不把错误上抛——/planet 的主体是那颗星球，不能因为「空间站数据拿不到」就整张卡失败。
+// 行动变量多一个「取到没有」的标记（EffectsKnown）：拿不到与确实没有在卡片上是两句话。
+func (h *handler) planetExtras(ctx context.Context, chatID int64, planets []hd2.Planet) PlanetExtras {
+	extras := PlanetExtras{Planets: planets}
+
+	if res, err := h.svc.Campaigns(ctx); err != nil {
+		log.Printf("/planet 战役查询失败，兴趣点缺「战役进行中」 chat=%d err=%v", chatID, err)
+	} else {
+		extras.Campaigns = res.Value
+	}
+	if res, err := h.svc.Assignments(ctx); err != nil {
+		log.Printf("/planet 重要指令查询失败，兴趣点缺「重要指令目标」 chat=%d err=%v", chatID, err)
+	} else {
+		extras.Assignments = res.Value
+	}
+	if res, err := h.svc.Stations(ctx); err != nil {
+		log.Printf("/planet 空间站查询失败，兴趣点缺「DSS 停靠中」 chat=%d err=%v", chatID, err)
+	} else {
+		extras.Stations = res.Value
+	}
+	if res, err := h.svc.PlanetEffects(ctx); err != nil {
+		log.Printf("/planet 行动变量查询失败，卡片写「暂不可用」 chat=%d err=%v", chatID, err)
+	} else {
+		extras.Effects = res.Value
+		extras.EffectsKnown = true
+	}
+	return extras
 }
 
 // sendInlineHint 发送带行内搜索按钮的提示；前缀没配时不发（按钮点了也只会跳出空查询）。

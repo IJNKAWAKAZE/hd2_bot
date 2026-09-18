@@ -45,14 +45,32 @@ func FormatStationsText(card StationsCard) string {
 	} else {
 		for _, item := range card.Items {
 			fmt.Fprintf(&b, "\n*%s*\n", bot.Escape(item.Name))
-			fmt.Fprintf(&b, "选举 / 跃迁截止：%s\n", bot.Escape(item.ElectionEnd))
+			fmt.Fprintf(&b, "当前停靠：%s\n", bot.Escape(item.Location))
+			fmt.Fprintf(&b, "跃迁时间：%s", bot.Escape(item.ElectionEnd))
+			if item.JumpCountdown != "" {
+				fmt.Fprintf(&b, "（还有 %s）", bot.Escape(item.JumpCountdown))
+			}
+			b.WriteString("\n")
 			if len(item.Actions) == 0 {
 				b.WriteString("战术行动：暂无\n")
-				continue
+			} else {
+				b.WriteString("战术行动：\n")
+				for _, action := range item.Actions {
+					// 一行一项：名称（阶段）＋ 募捐进度 ＋ 时间行；后两项是空的就不写，
+					// 不留一串光秃秃的分隔符（例如冷却中的行动本来就没有募捐进度可写）。
+					fmt.Fprintf(&b, "· %s（%s）", bot.Escape(action.Name), bot.Escape(action.Status))
+					if action.Detail != "" {
+						fmt.Fprintf(&b, "｜ %s", bot.Escape(action.Detail))
+					}
+					if action.TimeText != "" {
+						fmt.Fprintf(&b, "｜ %s", bot.Escape(action.TimeText))
+					}
+					b.WriteString("\n")
+				}
 			}
-			b.WriteString("战术行动：\n")
-			for _, action := range item.Actions {
-				fmt.Fprintf(&b, "· %s（%s）\n", bot.Escape(action.Name), bot.Escape(action.Status))
+			// 常驻被动与卡片同源：卡片上有这一节，文本回退里也要有。
+			if item.PassiveDesc != "" {
+				fmt.Fprintf(&b, "常驻被动 · %s：%s\n", bot.Escape(item.PassiveName), bot.Escape(item.PassiveDesc))
 			}
 		}
 	}

@@ -62,6 +62,7 @@ type CacheConfig struct {
 	DispatchesTTL  Second `mapstructure:"dispatches_ttl"`
 	EventsTTL      Second `mapstructure:"events_ttl"`
 	StationsTTL    Second `mapstructure:"stations_ttl"`
+	EffectsTTL     Second `mapstructure:"effects_ttl"` // 行动变量（补充源，只在单星球卡上展示）
 }
 
 // LimitConfig 限流与重试参数。
@@ -196,6 +197,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.dispatches_ttl", 600)
 	v.SetDefault("cache.events_ttl", 300)
 	v.SetDefault("cache.stations_ttl", 120)
+	v.SetDefault("cache.effects_ttl", 300)
 	v.SetDefault("limit.rate", 4)
 	// 窗口默认 60 秒：上游实测是「5 次/分钟/IP」（响应头 x-ratelimit-limit: 5，
 	// 第 6 次请求直接 429，且各端点共用一个额度）。窗口写小了等于自己把额度打爆——
@@ -274,6 +276,7 @@ func (c *Config) Validate() error {
 		{"cache.dispatches_ttl", c.Cache.DispatchesTTL},
 		{"cache.events_ttl", c.Cache.EventsTTL},
 		{"cache.stations_ttl", c.Cache.StationsTTL},
+		{"cache.effects_ttl", c.Cache.EffectsTTL},
 		{"limit.cooldown", c.Limit.Cooldown},
 	} {
 		if item.value <= 0 {

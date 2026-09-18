@@ -436,7 +436,7 @@ func TestIsEnemyFaction(t *testing.T) {
 	}
 }
 
-// TestTacticalActionName 校验战术行动的展示名与图标：对照表四行逐行钉住（译名与图标都要对），
+// TestTacticalActionName 校验战术行动的展示名与图标：对照表逐行钉住（译名与图标都要对），
 // 未收录的返回去掉首尾空白后的原文与空图标，纯空白入参返回空串（占位由调用方决定）。
 func TestTacticalActionName(t *testing.T) {
 	cases := []struct {
@@ -446,6 +446,10 @@ func TestTacticalActionName(t *testing.T) {
 		{"EAGLE STORM", "飞鹰风暴", "tactical.eagle_storm"},
 		{"ORBITAL BLOCKADE", "轨道封锁", "tactical.orbital_blockade"},
 		{"HEAVY ORDNANCE DISTRIBUTION", "重型军械分发", "tactical.heavy_ordnance"},
+		// 飞鹰封锁与星球轰炸本仓库没有独立素材，按参考站的做法复用同族图标
+		{"EAGLE BLOCK", "飞鹰封锁", "tactical.eagle_storm"},
+		{"PLANETARY BOMBARDMENT", "星球轰炸", "tactical.planetary_bombardment"},
+		// 只译名、不单独占一行（上游从没报过它）
 		{"ORBITAL NAPALM BARRAGE", "轨道燃烧弹幕", "tactical.orbital_napalm"},
 		// 上游大小写不稳定，匹配前统一折叠
 		{"eagle storm", "飞鹰风暴", "tactical.eagle_storm"},
@@ -463,6 +467,73 @@ func TestTacticalActionName(t *testing.T) {
 	}
 }
 
+// TestTacticalActions 校验「卡片上固定列出的战术行动」清单：顺序照参考站，
+// 每项都要有译名、图标与效果编号（缺效果编号就没法跟上游数据对上号），
+// 只译名不占行的行动（轨道燃烧弹幕）不该出现在清单里——把游戏里没有的行动画成「募捐中」是在编内容。
+func TestTacticalActions(t *testing.T) {
+	specs := TacticalActions()
+	want := []string{"飞鹰风暴", "轨道封锁", "重型军械分发", "飞鹰封锁", "星球轰炸"}
+	if len(specs) != len(want) {
+		t.Fatalf("清单应有 %d 项，实际 %d 项：%+v", len(want), len(specs), specs)
+	}
+	for i, w := range want {
+		spec := specs[i]
+		if spec.Name != w {
+			t.Errorf("第 %d 项应是 %q，实际 %q", i+1, w, spec.Name)
+		}
+		if spec.UpstreamName == "" || spec.Icon == "" || len(spec.EffectIDs) == 0 {
+			t.Errorf("第 %d 项（%s）缺展示或匹配依据：%+v", i+1, w, spec)
+		}
+	}
+	// 返回的是副本：调用方改它不该影响包内的表。
+	specs[0].Name = "改过的名字"
+	if again := TacticalActions(); again[0].Name != "飞鹰风暴" {
+		t.Errorf("TacticalActions 应返回副本，包内清单被改动了：%+v", again[0])
+	}
+	for _, spec := range specs {
+		if spec.Name == "轨道燃烧弹幕" {
+			t.Error("只译名不占行的行动不该出现在固定清单里")
+		}
+	}
+}
+
+// TestCurrencyName 校验奖励货币对照表：收录的给中文名，没收录的返回 false（卡片退回原值）。
+func TestCurrencyName(t *testing.T) {
+	cases := []struct {
+		id32 int64
+		want string
+	}{
+		{897894480, "勋章"}, // 实测当前重要指令的奖励
+		{3608481516, "申购单"},
+		{3992382197, "普通样本"},
+		{2985106497, "稀有样本"},
+		{3670075867, "超级样本"},
+		{3481751602, "超级信用点"},
+	}
+	for _, c := range cases {
+		name, ok := CurrencyName(c.id32)
+		if !ok || name != c.want {
+			t.Errorf("CurrencyName(%d) = %q/%v，期望 %q/true", c.id32, name, ok, c.want)
+		}
+	}
+	if _, ok := CurrencyName(12345); ok {
+		t.Error("对照表外的 id32 应返回 false")
+	}
+}
+
+// TestRewardTypeName 校验奖励类别对照：只收录有把握的 1（勋章），其余编号返回 false 让卡片退回原值。
+// 上游主源的 reward 只有 {type, amount}，没有 id32，这张表是主源路径上唯一能认奖励的依据。
+func TestRewardTypeName(t *testing.T) {
+	if name, ok := RewardTypeName(1); !ok || name != "勋章" {
+		t.Errorf("RewardTypeName(1) = %q/%v，期望 勋章/true", name, ok)
+	}
+	for _, rewardType := range []int{0, 2, 3, 7} {
+		if name, ok := RewardTypeName(rewardType); ok {
+			t.Errorf("未收录的类别 %d 应返回 false，实际 %q", rewardType, name)
+		}
+	}
+}
+
 // TestTacticalStatus 校验状态数字到文案的映射：未收录的取值显示「状态 N」，不猜成已知状态。
 func TestTacticalStatus(t *testing.T) {
 	cases := []struct {
@@ -470,8 +541,8 @@ func TestTacticalStatus(t *testing.T) {
 		text, class string
 	}{
 		{0, "未激活", "tag"},
-		{1, "准备中", "tag--gold"},
-		{2, "进行中", "tag--win"},
+		{1, "募捐中", "tag--gold"},
+		{2, "已激活", "tag--win"},
 		{3, "冷却中", "tag"},
 		{9, "状态 9", "tag"},
 	}

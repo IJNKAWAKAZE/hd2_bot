@@ -1,6 +1,10 @@
 {{- /* planet 是 /planet 的单星球卡片，版式对齐社区站点 HD2 真理部星图页的星球卡：
        阵营色卡框（.f-* 切 --fc/--fcd）＋ 顶栏（派系徽记 · 派系名 · 在线士兵）＋ 群系实景图 ＋
-       战役状态与星球名 ＋ 进度条与保卫倒计时，下面接「星球情报 / 环境危害 / 星球事件」三个小节。
+       战役状态与星球名 ＋ 进度条与保卫倒计时，下面接六个小节：
+       「战略情报分析 / 星球情报 / 环境危害 / 行动变量 / 兴趣点 / 星球事件」（用户 2026-09-18 要求
+       参照社区站点星图页的星球详情补齐前三块里的战略情报分析、行动变量与兴趣点）。
+       战略情报分析只靠星球自身数据（解放度 / 抵抗度 / 星球血量 / 玩家数量，口径见 Go 侧 planetIntel）；
+       行动变量与兴趣点是「有外部数据才说得出口」的两块，没有内容时各写一句说明（EffectNote）。
        视图模型是 Go 侧的 PlanetCard：缺省值已经填成「—」「未知」「暂无环境危害」，
        配色 class 与素材逻辑名也算好了，模板不做任何计算。
        环境危害逐条来自 EnvItems（上游的 None 占位在 Go 侧已剔除）：有真实危害时先列名字 chips、
@@ -49,13 +53,17 @@
   </div></div>
   <div class="planet-detail">
   <div class="pd-section">
+    <div class="pd-title">战略情报分析<span class="pd-cn">STRATEGIC ANALYSIS</span></div>
+    {{range .Intel}}<div class="pd-row"><span>{{.Label}}</span><strong class="pd-v {{.Class}}">{{.Value}}</strong></div>{{end}}
+  </div>
+
+  <div class="pd-section">
     <div class="pd-title">星球情报<span class="pd-cn">PLANET INTEL</span></div>
     <div class="pd-row"><span>生物群系</span><strong class="pd-v">{{.Biome}}</strong></div>
     {{if .BiomeDesc}}<div class="pd-row"><span>群系说明</span><strong class="pd-v">{{.BiomeDesc}}</strong></div>{{end}}
     <div class="pd-row"><span>当前控制方</span><strong class="pd-v {{.OwnerClass}}">{{.Owner}}</strong></div>
     <div class="pd-row"><span>初始控制方</span><strong class="pd-v">{{.InitialOwner}}</strong></div>
-    <div class="pd-row"><span>星球血量</span><strong class="pd-v">{{.HealthText}}</strong></div>
-    {{if .Attacking}}<div class="pd-row"><span>进攻目标</span><strong class="pd-v">编号 {{.Attacking}}</strong></div>{{end}}
+    {{if .Attacking}}<div class="pd-row"><span>进攻目标</span><strong class="pd-v">{{.Attacking}}</strong></div>{{end}}
   </div>
 
   <div class="pd-section">
@@ -67,6 +75,22 @@
     <div class="pd-empty">{{.Hazards}}</div>
     {{end}}
     {{if .EnvNote}}<div class="pd-empty">{{.EnvNote}}</div>{{end}}
+  </div>
+
+  <div class="pd-section">
+    <div class="pd-title">行动变量<span class="pd-cn">OPERATIONAL PARAMETERS</span></div>
+    {{if .EffectChips}}
+    <div class="pd-chips">{{range .EffectChips}}<span class="pd-chip{{if .Negative}} pd-chip-neg{{end}}">{{.Name}}</span>{{end}}</div>
+    {{range .EffectChips}}{{if .Description}}<div class="pd-trait"><b>{{.Name}}{{if .Category}} · {{.Category}}{{end}}</b><p>{{.Description}}</p></div>{{end}}{{end}}
+    {{else if .EffectNote}}
+    <div class="pd-empty">{{.EffectNote}}</div>
+    {{end}}
+  </div>
+
+  <div class="pd-section">
+    <div class="pd-title">兴趣点<span class="pd-cn">POINTS OF INTEREST</span></div>
+    {{if .POIs}}<div class="pd-chips">{{range .POIs}}<span class="pd-chip {{.Class}}">{{.Text}}</span>{{end}}</div>
+    {{else}}<div class="pd-empty">暂无兴趣点。</div>{{end}}
   </div>
 
   {{if .Event}}

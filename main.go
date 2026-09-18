@@ -383,6 +383,7 @@ func buildTTLConfig(cfg *config.Config) hd2.TTLConfig {
 		Dispatches:  cfg.Cache.DispatchesTTL.Duration(),
 		Events:      cfg.Cache.EventsTTL.Duration(),
 		Stations:    cfg.Cache.StationsTTL.Duration(),
+		Effects:     cfg.Cache.EffectsTTL.Duration(),
 	}
 }
 

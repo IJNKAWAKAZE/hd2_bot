@@ -619,12 +619,16 @@ func TestPlanetsCardSmokeWithRealBrowser(t *testing.T) {
 		card render.Card
 	}{
 		{"hd2_planets_card.png", render.Card{Name: "planets", Data: BuildPlanetsCard(summary, fetchedAt, false)}},
-		{"hd2_planet_card.png", render.Card{Name: "planet", Data: BuildPlanetCard(testPlanets()[1], fetchedAt, false)}},
+		// 补充数据没取到（行动变量「暂不可用」、兴趣点只剩星区）：生产里就是这一种。
+		{"hd2_planet_card.png", render.Card{Name: "planet", Data: planetCardWithExtras(testPlanets()[1], PlanetExtras{}, fetchedAt)}},
 		// 环境区块（群系说明 + 逐条危害）：真浏览器渲染一遍，模板改坏了这里会直接报错，
 		// 只跑 render.HTML 的用例看不出排版被 CSS 挤坏。
-		{"hd2_planet_env_card.png", render.Card{Name: "planet", Data: BuildLocalizedPlanetCard(context.Background(), testPlanetWithEnvironment(), fetchedAt, false, &plugtest.Translator{Out: []string{"落叶林", "温带林地", "酸雨风暴", "腐蚀性降雨会损坏护甲。"}})}},
+		{"hd2_planet_env_card.png", render.Card{Name: "planet", Data: planetCardWithExtras(testPlanetWithEnvironment(), PlanetExtras{EffectsKnown: true}, fetchedAt)}},
+		// 战略情报分析 / 行动变量 / 兴趣点（用户 2026-09-18 要求）：用带补充数据的样本渲染一遍，
+		// 这三块只有拿到外部数据才说得出口，冒烟图里必须看得见（口径见 planetIntel / FillPlanetExtras）。
+		{"hd2_planet_extras_card.png", render.Card{Name: "planet", Data: planetCardWithExtras(testPlanetWithExtras(), testPlanetExtras(), fetchedAt)}},
 		// 防守战（有事件 + 保卫倒计时 + 事件小节）：整张卡跟着入侵方走色。
-		{"hd2_planet_defense_card.png", render.Card{Name: "planet", Data: BuildLocalizedPlanetCard(context.Background(), testPlanetOnDefense(), fetchedAt, false, &plugtest.Translator{Out: []string{"落叶林", "温带林地", "酸雨风暴", "腐蚀性降雨会损坏护甲。"}})}},
+		{"hd2_planet_defense_card.png", render.Card{Name: "planet", Data: planetCardWithExtras(testPlanetOnDefense(), testDefenseExtras(), fetchedAt)}},
 	}
 	for _, tc := range cases {
 		start := time.Now()
@@ -1508,4 +1512,365 @@ func TestEnvironmentBudgetsTerminalLimitBoundary(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ---- 战略情报分析 / 行动变量 / 兴趣点的用例（用户 2026-09-18 要求，参照社区站点星图页）----
+
+// intelValue 取「战略情报分析」里某一行的数值；标签不存在时返回空串（用例自行断言缺行）。
+func intelValue(rows []IntelRow, label string) string {
+	for _, row := range rows {
+		if row.Label == label {
+			return row.Value
+		}
+	}
+	return ""
+}
+
+// intelClass 取某一行的配色 class。
+func intelClass(rows []IntelRow, label string) string {
+	for _, row := range rows {
+		if row.Label == label {
+			return row.Class
+		}
+	}
+	return ""
+}
+
+// TestPlanetIntelRows 校验战略情报分析四行的口径：解放度两位小数、抵抗度带强度词与配色 class、
+// 星球血量「百分比 · 当前/上限」、玩家数量千分位。
+// 样本取自 testPlanets()[1]（机器人控制、被打到 19.24% 血量、每秒回复 5.5555553）。
+func TestPlanetIntelRows(t *testing.T) {
+	rows := planetIntel(testPlanets()[1])
+	want := []struct{ label, value, class string }{
+		{"解放度", "80.76%", ""},
+		{"抵抗度", "1.25% / 小时（低）", "res-low"},
+		{"星球血量", "19% · 307,863 / 1,600,000", ""},
+		{"玩家数量", "19,507", ""},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("战略情报分析应有 %d 行，实际 %+v", len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].Label != w.label || rows[i].Value != w.value || rows[i].Class != w.class {
+			t.Errorf("第 %d 行错误：期望 %+v，实际 %+v", i+1, w, rows[i])
+		}
+	}
+}
+
+// TestPlanetIntelSpecialCases 校验两种固定说法与缺数据时的兜底：
+// 我方满血且没有战事写「已解放」，我方控制但正在挨打写「超级地球控制中」，
+// 玩家数为 0 写「—」，血量上限缺失时整行写「—」。
+func TestPlanetIntelSpecialCases(t *testing.T) {
+	peaceful := hd2.Planet{Index: 1, Name: "Nublaria I", Sector: "Akira", CurrentOwner: "Humans", Health: 1000000, MaxHealth: 1000000}
+	if got := intelValue(planetIntel(peaceful), "解放度"); got != "已解放" {
+		t.Errorf("我方满血且无战事应写「已解放」，实际 %q", got)
+	}
+	if got := intelValue(planetIntel(peaceful), "抵抗度"); got != "无" {
+		t.Errorf("每秒回复为 0 时抵抗度应写「无」，实际 %q", got)
+	}
+	if got := intelValue(planetIntel(peaceful), "玩家数量"); got != plugutil.DashText {
+		t.Errorf("玩家数为 0 应写 %q，实际 %q", plugutil.DashText, got)
+	}
+
+	// 我方控制但有防守事件：血量恒满，直接说「0.00%」会被读成「还没拿下来」。
+	defending := testPlanets()[2]
+	if got := intelValue(planetIntel(defending), "解放度"); got != "超级地球控制中" {
+		t.Errorf("我方控制且正在防守应写「超级地球控制中」，实际 %q", got)
+	}
+
+	// 上限缺失（上游脏数据）：算不出百分比，写「—」而不是「0%」。
+	broken := hd2.Planet{Index: 2, Name: "Bekvam III", CurrentOwner: "Automaton"}
+	if got := intelValue(planetIntel(broken), "星球血量"); got != plugutil.DashText {
+		t.Errorf("血量上限缺失应写 %q，实际 %q", plugutil.DashText, got)
+	}
+}
+
+// TestResistanceTiers 校验抵抗强度四档的阈值与配色：低 ≤1.99 / 中 2–2.99 / 高 3–3.99 / 极高 ≥4。
+// 上限统一取 1,000,000，每秒回复换算成「每小时百分之几」后正好落在各档。
+func TestResistanceTiers(t *testing.T) {
+	cases := []struct {
+		regen float64
+		value string
+		class string
+	}{
+		{0, "无", "res-none"},
+		{5, "1.8% / 小时（低）", "res-low"},
+		{7, "2.52% / 小时（中）", "res-mid"},
+		{9, "3.24% / 小时（高）", "res-high"},
+		{12, "4.32% / 小时（极高）", "res-max"},
+	}
+	for _, c := range cases {
+		p := hd2.Planet{Index: 3, Name: "Bekvam III", Health: 1000000, MaxHealth: 1000000, RegenPerSecond: c.regen}
+		value, class := resistanceText(p)
+		if value != c.value || class != c.class {
+			t.Errorf("每秒回复 %v 时抵抗度应为 %q/%q，实际 %q/%q", c.regen, c.value, c.class, value, class)
+		}
+	}
+}
+
+// TestFillPlanetExtrasResolvesAttackingName 校验「进攻目标」在补上星球列表后写星球名：
+// 卡面上一行编号（「216」）在群里没人能对上号；列表里找不到那颗星球时才退回编号，不编名字。
+// 模板里也刻意不带「编号」二字的前缀，标题行直接就是星球名。
+func TestFillPlanetExtrasResolvesAttackingName(t *testing.T) {
+	p := testPlanets()[2] // 编号 268（Luxuriant），Attacking = [216]
+	card := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{Planets: testPlanets()})
+	if card.Attacking != "孔雀十一（Peacock）" {
+		t.Errorf("进攻目标应写星球名，实际 %q", card.Attacking)
+	}
+	html, err := render.HTML(render.Card{Name: "planet", Data: card})
+	if err != nil {
+		t.Fatalf("生成 HTML 失败：%v", err)
+	}
+	if !strings.Contains(html, "进攻目标") || !strings.Contains(html, "孔雀十一（Peacock）") {
+		t.Error("卡片上应把进攻目标写成星球名")
+	}
+	if strings.Contains(html, "编号 216") {
+		t.Error("进攻目标不该再带「编号」前缀")
+	}
+
+	// 星球列表里没有那颗星球（补充数据缺失）时退回编号兜底，并带上「#」标明这是编号而不是名字。
+	lonely := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{})
+	if lonely.Attacking != "#216" {
+		t.Errorf("查不到星球名时应退回带 # 的编号，实际 %q", lonely.Attacking)
+	}
+}
+
+// TestFillPlanetExtrasEffectChips 校验行动变量标签：对照表与同族别名命中的给中文名，
+// 作战限制类标成负面，两处都查不到的并成一条「未知行动变量」（不显示编号），
+// 别的星球的效果不进这张卡，同编号与同名（同族变体）的重复各只留一条。
+func TestFillPlanetExtrasEffectChips(t *testing.T) {
+	p := testPlanets()[1] // 编号 110
+	extras := PlanetExtras{
+		EffectsKnown: true,
+		Effects: []hd2.PlanetEffect{
+			{PlanetIndex: 110, EffectID: 1243}, // 掠食变种：对照表收录且带说明
+			{PlanetIndex: 110, EffectID: 1243}, // 上游偶发重复：只留一条
+			{PlanetIndex: 110, EffectID: 1245}, // 同名变体编号：按名字去重，不再多占一格
+			{PlanetIndex: 110, EffectID: 1272}, // 对照表没收、同族别名命中：给名字与分类，但不带说明
+			{PlanetIndex: 110, EffectID: 1313}, // 作战限制：负面
+			{PlanetIndex: 110, EffectID: 1358}, // 两处都查不到：并成一条「未知行动变量」
+			{PlanetIndex: 216, EffectID: 1313}, // 别的星球：不该出现
+		},
+	}
+	card := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, extras)
+
+	if len(card.EffectChips) != 4 {
+		t.Fatalf("应得到 4 条行动变量，实际 %+v", card.EffectChips)
+	}
+	predator := card.EffectChips[0]
+	if predator.Name != "掠食变种" || predator.Category != "终结族变种" || predator.Negative {
+		t.Errorf("掠食变种的展示形态错误：%+v", predator)
+	}
+	if predator.Description == "" {
+		t.Error("对照表收录了说明的效果应带上说明")
+	}
+	// 别名只给名字与分类，不照抄同族其它编号的说明：那些说明里写着具体数值，抄过来就是错的。
+	if cut := card.EffectChips[1]; cut.Name != "预算削减" || cut.Category != "作战限制" || !cut.Negative || cut.Description != "" {
+		t.Errorf("同族别名应给名字与分类、不写说明：%+v", cut)
+	}
+	if delay := card.EffectChips[2]; delay.Name != "班机延误" || !delay.Negative {
+		t.Errorf("作战限制类的效果应标成负面：%+v", delay)
+	}
+	if unknown := card.EffectChips[3]; unknown.Name != unknownEffectText || unknown.Description != "" {
+		t.Errorf("查不到名字的效果应并成 %q 且不带说明：%+v", unknownEffectText, unknown)
+	}
+	if card.EffectNote != "" {
+		t.Errorf("有行动变量时不该写说明文案，实际 %q", card.EffectNote)
+	}
+}
+
+// TestFillPlanetExtrasEffectNotes 校验「确实没有」与「补充源没取到」是两句话：
+// 前者是补充源给出的结论，后者是数据缺失，卡片上不能混为一谈。
+func TestFillPlanetExtrasEffectNotes(t *testing.T) {
+	p := testPlanets()[1]
+	known := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{EffectsKnown: true})
+	if known.EffectNote != effectsEmptyText {
+		t.Errorf("补充源取到但没有行动变量时应写 %q，实际 %q", effectsEmptyText, known.EffectNote)
+	}
+	unknown := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{})
+	if unknown.EffectNote != effectsUnknownText {
+		t.Errorf("补充源没取到时应写 %q，实际 %q", effectsUnknownText, unknown.EffectNote)
+	}
+}
+
+// TestPlanetPOIs 校验五类兴趣点标签的文案、配色与顺序（目标 → 战役 → 空间站 → 反攻 → 星区），
+// 数据来源分别是重要指令、战役、空间站与「谁在打它」。
+func TestPlanetPOIs(t *testing.T) {
+	p := hd2.Planet{Index: 110, Name: "Bekvam III", Sector: "Akira", CurrentOwner: "Automaton"}
+	extras := PlanetExtras{
+		Planets: []hd2.Planet{
+			p,
+			{Index: 216, Name: "Peacock", Sector: "Jin Xi", Attacking: []int{110}},
+		},
+		Campaigns: []hd2.Campaign{{ID: 1, Planet: hd2.PlanetRef{Index: 110}, Type: 0}},
+		Assignments: []hd2.Assignment{{ID: 1, Tasks: []hd2.Task{
+			{Type: 11, Values: []int64{100, 110}, ValueTypes: []int{3, 12}},
+		}}},
+		Stations: []hd2.SpaceStation{{ID32: 749875195, PlanetIndex: 110}},
+	}
+	pois := planetPOIs(p, extras)
+	want := []struct{ text, class string }{
+		{"🎯 重要指令目标", "poi-mo"},
+		{"⚔️ 解放战役进行中", "poi-camp"},
+		{"🛰️ DSS 民主空间站停靠中", "poi-dss"},
+		{"⚠️ 敌军反攻中 · 来自 孔雀十一（Peacock）", "poi-atk"},
+		{"🌍 星区：阿基拉分区", ""},
+	}
+	if len(pois) != len(want) {
+		t.Fatalf("应有 %d 枚兴趣点标签，实际 %+v", len(want), pois)
+	}
+	for i, w := range want {
+		if pois[i].Text != w.text || pois[i].Class != w.class {
+			t.Errorf("第 %d 枚标签错误：期望 %+v，实际 %+v", i+1, w, pois[i])
+		}
+	}
+}
+
+// TestPlanetPOIsDefenseCampaignAndNoSelfAttack 校验两点：
+// 只有战役类型（type 4）没有事件时也按「入侵防御战」说；自己打自己这种脏数据不产生「敌军反攻」标签。
+func TestPlanetPOIsDefenseCampaignAndNoSelfAttack(t *testing.T) {
+	p := hd2.Planet{Index: 244, Name: "Varylia 5", Sector: "Jin Xi", CurrentOwner: "Humans"}
+	extras := PlanetExtras{
+		Planets:   []hd2.Planet{{Index: 244, Name: "Varylia 5", Attacking: []int{244}}}, // 脏数据：自己打自己
+		Campaigns: []hd2.Campaign{{ID: 2, Planet: hd2.PlanetRef{Index: 244}, Type: campaignTypeDefense}},
+	}
+	texts := make([]string, 0, len(planetPOIs(p, extras)))
+	for _, poi := range planetPOIs(p, extras) {
+		texts = append(texts, poi.Text)
+	}
+	joined := strings.Join(texts, " ｜ ")
+	if !strings.Contains(joined, "⚔️ 入侵防御战进行中") {
+		t.Errorf("战役类型为防御战时应写「入侵防御战进行中」，实际 %q", joined)
+	}
+	if strings.Contains(joined, "敌军反攻中") {
+		t.Errorf("自己打自己不该产生「敌军反攻中」标签，实际 %q", joined)
+	}
+	if !strings.Contains(joined, "🌍 星区：") {
+		t.Errorf("星区标签始终要显示，实际 %q", joined)
+	}
+}
+
+// TestPlanetCardHTMLExtras 校验模板把战略情报分析 / 行动变量 / 兴趣点三块排进卡片。
+func TestPlanetCardHTMLExtras(t *testing.T) {
+	p := testPlanets()[1]
+	extras := PlanetExtras{
+		EffectsKnown: true,
+		Effects:      []hd2.PlanetEffect{{PlanetIndex: 110, EffectID: 1243}, {PlanetIndex: 110, EffectID: 1313}},
+		Planets:      []hd2.Planet{p, {Index: 216, Name: "Peacock", Attacking: []int{110}}},
+		Campaigns:    []hd2.Campaign{{ID: 1, Planet: hd2.PlanetRef{Index: 110}, Type: 0}},
+		Assignments:  []hd2.Assignment{{ID: 1, Tasks: []hd2.Task{{Type: 11, Values: []int64{110}, ValueTypes: []int{12}}}}},
+		Stations:     []hd2.SpaceStation{{ID32: 1, PlanetIndex: 110}},
+	}
+	card := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, extras)
+	html, err := render.HTML(render.Card{Name: "planet", Data: card})
+	if err != nil {
+		t.Fatalf("生成 HTML 失败：%v", err)
+	}
+	for _, want := range []string{
+		"战略情报分析", "STRATEGIC ANALYSIS", "解放度", "抵抗度", "星球血量", "玩家数量",
+		"res-low", // 抵抗强度四档的配色 class
+		"行动变量", "OPERATIONAL PARAMETERS", "掠食变种", "班机延误", "pd-chip-neg",
+		"兴趣点", "POINTS OF INTEREST", "🎯 重要指令目标", "⚔️ 解放战役进行中",
+		"🛰️ DSS 民主空间站停靠中", "⚠️ 敌军反攻中", "🌍 星区：阿基拉分区",
+	} {
+		if !strings.Contains(html, want) {
+			t.Errorf("星球卡 HTML 缺少 %q", want)
+		}
+	}
+}
+
+// TestFillPlanetExtrasHTMLEmptyNotes 校验没有补充数据时卡片写的是「暂不可用」而不是「暂无」。
+func TestFillPlanetExtrasHTMLEmptyNotes(t *testing.T) {
+	p := testPlanets()[0]
+	card := FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{})
+	html, err := render.HTML(render.Card{Name: "planet", Data: card})
+	if err != nil {
+		t.Fatalf("生成 HTML 失败：%v", err)
+	}
+	if !strings.Contains(html, effectsUnknownText) {
+		t.Errorf("补充源没取到时卡片应写 %q", effectsUnknownText)
+	}
+}
+
+// TestFormatPlanetTextIncludesExtras 校验文本回退与卡片同口径：战略情报分析、行动变量与兴趣点都写出来。
+func TestFormatPlanetTextIncludesExtras(t *testing.T) {
+	p := testPlanets()[1]
+	extras := PlanetExtras{
+		EffectsKnown: true,
+		Effects:      []hd2.PlanetEffect{{PlanetIndex: 110, EffectID: 1243}},
+		Planets:      []hd2.Planet{p, {Index: 216, Name: "Peacock", Attacking: []int{110}}},
+	}
+	text := FormatPlanetText(FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, extras))
+	for _, want := range []string{
+		"解放度：", "抵抗度：", "星球血量：", "玩家数量：19,507",
+		"行动变量：掠食变种", "兴趣点：", "🌍 星区：阿基拉分区",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("文本回退缺少 %q：\n%s", want, text)
+		}
+	}
+}
+
+// TestFormatPlanetTextExtrasNotes 校验文本回退里「暂无」与「暂不可用」也是两句话。
+func TestFormatPlanetTextExtrasNotes(t *testing.T) {
+	p := testPlanets()[0]
+	known := FormatPlanetText(FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{EffectsKnown: true}))
+	if !strings.Contains(known, "行动变量："+effectsEmptyText) {
+		t.Errorf("补充源取到但没有行动变量时文本应写「%s」：\n%s", effectsEmptyText, known)
+	}
+	unknown := FormatPlanetText(FillPlanetExtras(BuildPlanetCard(p, testFetchedAt(), false), p, PlanetExtras{}))
+	if !strings.Contains(unknown, "行动变量："+effectsUnknownText) {
+		t.Errorf("补充源没取到时文本应写「%s」：\n%s", effectsUnknownText, unknown)
+	}
+}
+
+// testPlanetWithExtras 是「战略情报分析 / 行动变量 / 兴趣点」三块的样本星球：
+// 机器人控制、被打到 19.24% 血量（解放度 80.76%）、每秒回复 5.5555553（抵抗度 1.25%/小时）。
+func testPlanetWithExtras() hd2.Planet {
+	return testPlanets()[1]
+}
+
+// testPlanetExtras 是上面那颗星球的补充数据：五类兴趣点各拿一条，外加三条行动变量
+// （一条带说明、一条作战限制、一条对照表未收录）。
+func testPlanetExtras() PlanetExtras {
+	return PlanetExtras{
+		Planets: []hd2.Planet{
+			testPlanets()[1],
+			{Index: 216, Name: "Peacock", Sector: "Jin Xi", Attacking: []int{110}},
+		},
+		Campaigns:    []hd2.Campaign{{ID: 51428, Planet: hd2.PlanetRef{Index: 110}, Type: 0}},
+		Assignments:  []hd2.Assignment{{ID: 1, Tasks: []hd2.Task{{Type: 11, Values: []int64{100, 110}, ValueTypes: []int{3, 12}}}}},
+		Stations:     []hd2.SpaceStation{{ID32: 749875195, PlanetIndex: 110}},
+		EffectsKnown: true,
+		Effects: []hd2.PlanetEffect{
+			{PlanetIndex: 110, EffectID: 1243},
+			{PlanetIndex: 110, EffectID: 1272},
+			{PlanetIndex: 110, EffectID: 1313},
+		},
+	}
+}
+
+// testDefenseExtras 是防守战样本星球的补充数据：五类兴趣点各一条（战役按防御战说），
+// 外加两条行动变量——用来在冒烟图里核对「跟着入侵方配色 ＋ 三块新内容」同时出现时的排版。
+func testDefenseExtras() PlanetExtras {
+	p := testPlanetOnDefense()
+	return PlanetExtras{
+		Planets:      []hd2.Planet{p, {Index: 216, Name: "Peacock", Sector: "Jin Xi", Attacking: []int{268}}},
+		Campaigns:    []hd2.Campaign{{ID: 51713, Planet: hd2.PlanetRef{Index: 268}, Type: campaignTypeDefense}},
+		Assignments:  []hd2.Assignment{{ID: 1, Tasks: []hd2.Task{{Type: 11, Values: []int64{100, 268}, ValueTypes: []int{3, 12}}}}},
+		Stations:     []hd2.SpaceStation{{ID32: 749875195, PlanetIndex: 268}},
+		EffectsKnown: true,
+		Effects: []hd2.PlanetEffect{
+			{PlanetIndex: 268, EffectID: 1243},
+			{PlanetIndex: 268, EffectID: 1313},
+		},
+	}
+}
+
+// planetCardWithExtras 生成一张「本地化环境信息 ＋ 补充数据」都齐的单星球卡（冒烟用例共用）：
+// 环境信息固定用同一份译文，方便逐张对比排版，不让译文差异干扰判断。
+func planetCardWithExtras(p hd2.Planet, extras PlanetExtras, fetchedAt time.Time) PlanetCard {
+	card := BuildLocalizedPlanetCard(context.Background(), p, fetchedAt, false,
+		&plugtest.Translator{Out: []string{"落叶林", "温带林地", "酸雨风暴", "腐蚀性降雨会损坏护甲。"}})
+	return FillPlanetExtras(card, p, extras)
 }

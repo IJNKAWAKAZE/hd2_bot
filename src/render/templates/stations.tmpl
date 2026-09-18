@@ -1,22 +1,47 @@
+{{- /* stations 是 /stations 的民主空间站卡（DSS）。
+       版式（用户 2026-09-18 要求）：照参考项目 HD2 星图页的 DSS 面板做——
+       顶栏（空间站名 + 当前停靠 + 跃迁倒计时）、斜纹分节标题、每项行动一块
+       （图标 · 名称 · 阶段与募捐进度 · 右侧百分比 · 进度条 · 时间行），最后是「常驻被动」一节。
+       行动列表列的是**全部**已知行动：上游没报的那几项由 Go 侧补成「募捐中 · 等待募捐启动」，
+       与参考站一致（见 stationActions）。
+       刻意**不做**参考站右侧那块「效果详情」：静态图里点不动左栏，画一张永远停在第一个效果的详情只会误导人。
+       视图模型是 Go 侧的 StationsCard：文案、阶段 class、百分比与倒计时都已算好，模板只排版。 */ -}}
 {{define "body"}}
 {{if .Empty}}
 <section class="section"><p class="empty">暂无空间站数据。</p></section>
 {{else}}{{range .Items}}
 <article class="dss-hud">
-  <header class="dss-top"><h2>{{.Name}}</h2><span>DSS</span></header>
+  <header class="dss-top">
+    <div class="dss-head">
+      <h2>{{.Name}}</h2>
+      <div class="dss-loc">当前停靠：{{.Location}}</div>
+    </div>
+    {{if .JumpCountdown}}<span class="dss-jump">空间站即将移动：{{.JumpCountdown}}</span>{{end}}
+  </header>
   <div class="dss-div"></div>
-  <div class="dss-grid">
-    <section><h3 class="dss-sec">战术行动</h3>
-      {{range .Actions}}<div class="dss-action">
-        {{if .Icon}}{{icon .Icon "dss-icon"}}{{else}}<span></span>{{end}}
-        <strong>{{.Name}}</strong><span class="tag {{.StatusClass}}">{{.Status}}</span>
-      </div>{{else}}<p class="empty">当前没有战术行动。</p>{{end}}
-    </section>
-    <section class="dss-summary">
-      <div class="dss-hero">{{icon "emblem.dss" "dss-station"}}</div>
-      <div class="dss-detail"><h3>选举 / 跃迁截止</h3><strong class="mono">{{.ElectionEnd}}</strong></div>
-    </section>
+  <div class="dss-body">
+    <h3 class="dss-sec">战术行动<span class="n">{{.ActionCount}} 项</span></h3>
+    {{if .Actions}}{{range .Actions}}
+    <div class="dss-buff{{if .Active}} dss-buff--active{{end}}">
+      {{if .Icon}}{{icon .Icon "dss-icon"}}{{else}}<span></span>{{end}}
+      <div>
+        <div class="dss-name">{{.Name}}</div>
+        <div class="dss-sub"><span class="tag {{.StatusClass}}">{{.Status}}</span> {{.Detail}}</div>
+        {{if .TimeText}}<div class="dss-time">{{.TimeText}}</div>{{end}}
+      </div>
+      {{if .PercentText}}<div class="dss-pct">{{.PercentText}}</div>{{end}}
+      {{if .Bar}}<div class="dss-bar"><div class="dss-bar__fill" style="width: {{.Percent}}%"></div></div>{{end}}
+    </div>
+    {{end}}{{else}}<p class="dss-note">当前没有战术行动。</p>{{end}}
+    {{if .PassiveDesc}}
+    <h3 class="dss-sec dss-sec--sub">常驻被动</h3>
+    <div class="dss-passive">
+      <div class="dss-name">{{.PassiveName}}</div>
+      <p>{{.PassiveDesc}}</p>
+    </div>
+    {{end}}
   </div>
+  <footer class="dss-foot">跃迁截止 {{.ElectionEnd}}</footer>
 </article>
 {{end}}{{end}}
 {{end}}

@@ -33,6 +33,17 @@ type fakeService struct {
 	warErr     error
 	planetsGot int
 	warGot     int
+
+	// 单星球卡的补充数据（兴趣点与行动变量）：用例只填自己要验的那一项，
+	// 其余保持零值——零值就是「空结果、没有错误」，正好对应「这项数据取到了但列表是空的」。
+	campaigns      hd2.Result[[]hd2.Campaign]
+	campaignsErr   error
+	assignments    hd2.Result[[]hd2.Assignment]
+	assignmentsErr error
+	stations       hd2.Result[[]hd2.SpaceStation]
+	stationsErr    error
+	effects        hd2.Result[[]hd2.PlanetEffect]
+	effectsErr     error
 }
 
 // Planets 返回预先设定的星球列表。
@@ -45,6 +56,26 @@ func (f *fakeService) Planets(ctx context.Context) (hd2.Result[[]hd2.Planet], er
 func (f *fakeService) War(ctx context.Context) (hd2.Result[*hd2.War], error) {
 	f.warGot++
 	return f.war, f.warErr
+}
+
+// Campaigns 返回预先设定的战役列表。
+func (f *fakeService) Campaigns(context.Context) (hd2.Result[[]hd2.Campaign], error) {
+	return f.campaigns, f.campaignsErr
+}
+
+// Assignments 返回预先设定的重要指令。
+func (f *fakeService) Assignments(context.Context) (hd2.Result[[]hd2.Assignment], error) {
+	return f.assignments, f.assignmentsErr
+}
+
+// Stations 返回预先设定的空间站列表。
+func (f *fakeService) Stations(context.Context) (hd2.Result[[]hd2.SpaceStation], error) {
+	return f.stations, f.stationsErr
+}
+
+// PlanetEffects 返回预先设定的行动变量。
+func (f *fakeService) PlanetEffects(context.Context) (hd2.Result[[]hd2.PlanetEffect], error) {
+	return f.effects, f.effectsErr
 }
 
 // resolveFixtures 是参数解析用例的固定数据：5 颗覆盖中英文与前后缀匹配的星球。
@@ -737,5 +768,74 @@ func TestPlanetHandlerWithoutTranslatorKeepsEnglish(t *testing.T) {
 	}
 	if strings.Contains(s.Replies[0], "翻译暂不可用") {
 		t.Errorf("没配翻译层时不该写翻译不可用的说明：\n%s", s.Replies[0])
+	}
+}
+
+// TestPlanetHandlerFillsExtras 校验 /planet 把补充数据填进单星球卡：
+// 行动变量来自补充源，兴趣点里的「重要指令目标 / 战役进行中 / DSS 停靠中」来自另外三路数据。
+func TestPlanetHandlerFillsExtras(t *testing.T) {
+	s := &plugtest.Sender{GroupID: -100}
+	svc := &fakeService{
+		planets:     hd2.Result[[]hd2.Planet]{Value: testPlanets(), FetchedAt: testFetchedAt()},
+		campaigns:   hd2.Result[[]hd2.Campaign]{Value: []hd2.Campaign{{ID: 1, Planet: hd2.PlanetRef{Index: 110}, Type: 0}}},
+		assignments: hd2.Result[[]hd2.Assignment]{Value: []hd2.Assignment{{ID: 1, Tasks: []hd2.Task{{Type: 11, Values: []int64{110}, ValueTypes: []int{12}}}}}},
+		stations:    hd2.Result[[]hd2.SpaceStation]{Value: []hd2.SpaceStation{{ID32: 1, PlanetIndex: 110}}},
+		effects:     hd2.Result[[]hd2.PlanetEffect]{Value: []hd2.PlanetEffect{{PlanetIndex: 110, EffectID: 1243}}},
+	}
+	r := &plugtest.Renderer{Img: []byte("png-bytes")}
+
+	if err := runHandler(t, "planet", s, svc, r, time.UTC, "星球-", plugtest.MessageUpdate(-100, "/planet 110")); err != nil {
+		t.Fatalf("执行 /planet 失败：%v", err)
+	}
+	if len(r.Cards) != 1 || r.Cards[0].Name != "planet" {
+		t.Fatalf("应渲染 planet 卡片，实际 %+v", r.Cards)
+	}
+	card, ok := r.Cards[0].Data.(PlanetCard)
+	if !ok {
+		t.Fatalf("视图模型类型错误：%T", r.Cards[0].Data)
+	}
+	if len(card.EffectChips) != 1 || card.EffectChips[0].Name != "掠食变种" {
+		t.Errorf("行动变量应来自补充源并翻译成中文：%+v", card.EffectChips)
+	}
+	if card.EffectNote != "" {
+		t.Errorf("有行动变量时不该写说明文案，实际 %q", card.EffectNote)
+	}
+	texts := make([]string, 0, len(card.POIs))
+	for _, poi := range card.POIs {
+		texts = append(texts, poi.Text)
+	}
+	joined := strings.Join(texts, " ｜ ")
+	for _, want := range []string{"🎯 重要指令目标", "⚔️ 解放战役进行中", "🛰️ DSS 民主空间站停靠中", "🌍 星区："} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("兴趣点缺少 %q，实际 %q", want, joined)
+		}
+	}
+}
+
+// TestPlanetHandlerExtrasFailureKeepsCard 校验补充数据全部取不到时卡片照常出图：
+// 行动变量写「暂不可用」，兴趣点只剩始终可得的「星区」——不能因为这几路数据挂了就整张卡失败。
+func TestPlanetHandlerExtrasFailureKeepsCard(t *testing.T) {
+	s := &plugtest.Sender{GroupID: -100}
+	svc := &fakeService{
+		planets:        hd2.Result[[]hd2.Planet]{Value: testPlanets(), FetchedAt: testFetchedAt()},
+		campaignsErr:   errors.New("上游限流"),
+		assignmentsErr: errors.New("上游限流"),
+		stationsErr:    errors.New("上游限流"),
+		effectsErr:     errors.New("补充源不可用"),
+	}
+	r := &plugtest.Renderer{Img: []byte("png-bytes")}
+
+	if err := runHandler(t, "planet", s, svc, r, time.UTC, "星球-", plugtest.MessageUpdate(-100, "/planet 110")); err != nil {
+		t.Fatalf("执行 /planet 失败：%v", err)
+	}
+	if len(s.Photos) != 1 {
+		t.Fatalf("补充数据失败也应出图，实际调用 %v", s.Calls)
+	}
+	card := r.Cards[0].Data.(PlanetCard)
+	if card.EffectNote != effectsUnknownText {
+		t.Errorf("补充源没取到时卡片应写 %q，实际 %q", effectsUnknownText, card.EffectNote)
+	}
+	if len(card.POIs) != 1 || !strings.Contains(card.POIs[0].Text, "🌍 星区：") {
+		t.Errorf("只剩星区这一枚兴趣点标签，实际 %+v", card.POIs)
 	}
 }

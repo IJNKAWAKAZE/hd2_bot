@@ -7,7 +7,8 @@
 //   - 简报正文里的游戏内标记（<i=3>…</i>）在展示前清理，超过上限的正文截断并在卡片上注明；
 //   - 简报正文默认翻成中文（见 BuildTranslatedDispatches）：翻译不可用时保留英文并在卡片上注明，
 //     翻译失败不算命令失败，照常出图；
-//   - 任务/奖励等枚举值上游没有公布含义，一律按原值给数字，不猜。
+//   - 任务里的枚举（类型/阵营/目标值/星球索引）按社区口径解码成中文，依据见 decode.go 文件头；
+//     表里没有的枚举与奖励类型仍按原值给数字，不猜。
 package orders
 
 import (
@@ -58,6 +59,9 @@ type OrdersService interface {
 	Assignments(ctx context.Context) (hd2.Result[[]hd2.Assignment], error)
 	// Dispatches 返回战役简报，上游按最新在前返回。
 	Dispatches(ctx context.Context) (hd2.Result[[]hd2.Dispatch], error)
+	// Planets 返回星球列表：任务里的星球索引（valueType 12）要靠它翻成星球名。
+	// 只在真的出现星球索引时才会被调用，取数失败也不影响指令查询（见 handler.planetNames）。
+	Planets(ctx context.Context) (hd2.Result[[]hd2.Planet], error)
 }
 
 // Translator 是正文翻译能力；为 nil 时不做翻译（等价于 translate.enabled=false）。
@@ -117,7 +121,10 @@ func (h *handler) assignments(update tgbotapi.Update) error {
 
 	// 空列表不是错误（实测上游就是返回 []）：照常出一张「暂无重要指令」的占位卡。
 	fetchedAt := res.FetchedAt.In(h.display)
-	card := BuildTranslatedAssignments(ctx, res.Value, fetchedAt, res.Stale, h.trans)
+	// 星球名要在构建卡片前拿到：任务行里的星球是索引，不取列表就只能显示编号。
+	// 这一步是尽力而为的（见 planetNames），拿不到也照常出卡。
+	planets := h.planetNames(ctx, res.Value, chatID)
+	card := BuildTranslatedAssignments(ctx, res.Value, fetchedAt, res.Stale, h.trans, planets)
 
 	renderCtx, renderCancel := context.WithTimeout(context.Background(), plugutil.Timeout)
 	defer renderCancel()
@@ -127,6 +134,28 @@ func (h *handler) assignments(update tgbotapi.Update) error {
 		return h.sender.Reply(chatID, FormatAssignmentsText(card), msg.MessageID)
 	}
 	return h.sender.SendPhoto(chatID, img, msg.MessageID)
+}
+
+// planetNames 取「星球索引 → 星球原名」，供任务里的星球索引（valueType 12）查名。
+//
+// 只有任务里真的出现星球索引时才去抓星球列表：常见的「消灭敌人」型指令不带星球，
+// 不该为它多打一次上游。
+// 抓不到不算 /assignments 失败——指令照常出图，只是这些任务退回「星球 #N」：
+// 星球名缺失远没有「整张卡片报错」严重，两者不能绑在一起。
+func (h *handler) planetNames(ctx context.Context, list []hd2.Assignment, chatID int64) PlanetNames {
+	if !needsPlanetNames(list) {
+		return nil
+	}
+	res, err := h.svc.Planets(ctx)
+	if err != nil {
+		log.Printf("/assignments 取星球列表失败 chat=%d err=%v", chatID, err)
+		return nil
+	}
+	names := make(PlanetNames, len(res.Value))
+	for _, p := range res.Value {
+		names[p.Index] = p.Name
+	}
+	return names
 }
 
 // dispatches 处理 /dispatches [n]：取简报 → 按条数出图。

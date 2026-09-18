@@ -157,6 +157,23 @@ SVG 图标在卡片里是**内联**的（不是 `<img>`）：它们多是纯黑�
 许可口径与第四节（wiki.gg）一致：这些数值与描述整理自 **helldivers.wiki.gg**（CC BY-NC-SA），
 站点自身的代码与数据编排按其仓库分发；本项目只做展示，卡片上不注明来源，完整口径只保留在本文件里。
 
+## 八、星球「行动变量」的中文对照表（`src/hd2/data/galactic_effects.json`，2026-09-18 新增）
+
+`/planet` 卡片上「行动变量」那一段（效果中文名、说明、作战限制类标记）来自社区站点
+**`jerry114514/Jerry114514.github.io`** 的 `HD2-Galatic_war-Map/tables/`：
+
+| 上游文件 | 本文件里用到的部分 |
+| --- | --- |
+| `effect_id_cn.json` | 效果 ID → 短中文名（卡片 chip 上的名字） |
+| `hd2_variables.json` | 分类 → 条目（中文名 / 说明 / `effect_ids`），取用其中的中文名、说明与分类 |
+
+合并时只保留卡片要用的字段，并剔除 DSS 战略行动（`tactical_action`）分类——那批效果由空间站卡展示，
+星球卡不再重复。用法与第七节一致：**随仓库发布的内嵌数据**（`go:embed`，见 `src/hd2/galactic.go`），
+不联网、不落盘；表里查不到的效果 ID 按「效果 #ID」原样显示，不做猜测。
+
+「哪些星球带着哪些效果」是运行时从 Helldivers Companion（非官方补充源）取的，与上表无关：
+上表只负责把编号翻成中文。名称与说明与游戏本体一样出自 Arrowhead Game Studios，许可口径见版权声明。
+
 ## 版权声明
 
 《Helldivers》及相关名称、虚构设定是 Arrowhead Game Studios / Sony Interactive Entertainment 的商标或知识产权。

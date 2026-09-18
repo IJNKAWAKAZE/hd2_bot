@@ -2,6 +2,7 @@ package hd2
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -14,6 +15,9 @@ type TTLConfig struct {
 	Dispatches  time.Duration
 	Events      time.Duration
 	Stations    time.Duration
+	// Effects 是行动变量（补充源）的缓存时长：它只在单星球卡上用，且变化很慢，
+	// 取数一次要下整个补充源整包（实测 400KB 上下），所以默认比其它项长。
+	Effects time.Duration
 }
 
 // Result 是一次查询的结果：数据 + 数据时间 + 是否来自快照降级。
@@ -126,6 +130,23 @@ func (s *Service) Stations(ctx context.Context) (Result[[]SpaceStation], error) 
 	return res, err
 }
 
+// PlanetEffects 返回各星球当前生效的行动变量（哪颗星球带着哪些效果）。
+//
+// 这份数据只在补充源上：主数据源的 /planets 没有对应字段，所以未配置补充源时直接返回错误，
+// 让调用方把「拿不到」与「确实没有」分开说（卡片上前者写「暂不可用」、后者写「暂无」）。
+// 不落快照（fetchWith 的 keepSnapshot 传 false）：整包 400KB 存一份只为降级不划算，
+// 行动变量本来就只是单星球卡上的补充信息，拿不到就在卡片上说明一句。
+func (s *Service) PlanetEffects(ctx context.Context) (Result[[]PlanetEffect], error) {
+	if s.companion == nil {
+		return Result[[]PlanetEffect]{}, errors.New("未配置补充源，无法查询行动变量")
+	}
+	res, err := fetchWith(s, ctx, namePlanetEffects, s.ttl.Effects, func(ctx context.Context) ([]byte, error) {
+		return s.companion.Get(ctx, CompanionPathAPIData)
+	}, DecodePlanetEffects, false)
+	res.Value = cloneSlice(res.Value)
+	return res, err
+}
+
 // cloneSlice 复制一层切片，避免调用方就地排序或改写元素时污染缓存里的数据。
 // 只复制一层：元素内部的指针字段（例如 Planet.Event）仍与缓存共享，调用方不要改动它们。
 func cloneSlice[T any](in []T) []T {
@@ -137,13 +158,24 @@ func cloneSlice[T any](in []T) []T {
 	return out
 }
 
-// fetch 是各查询方法的统一实现：命中缓存直接返回；否则经限流取数并写快照；
-// 取数（或解码）失败时回落到最近一次快照，并标记 Stale。
+// fetch 是主数据源各查询方法的统一实现：取数路径固定为主源端点，其余交给 fetchWith。
 func fetch[T any](s *Service, ctx context.Context, name string, ttl time.Duration, decode func([]byte) (T, error)) (Result[T], error) {
+	return fetchWith(s, ctx, name, ttl, func(ctx context.Context) ([]byte, error) {
+		return s.client.Get(ctx, Endpoint(name))
+	}, decode, true)
+}
+
+// fetchWith 是各查询方法的统一实现：命中缓存直接返回；否则经限流取数并写快照；
+// 取数（或解码）失败时回落到最近一次快照，并标记 Stale。
+//
+// get 决定数据从哪来（主源端点或补充源），keepSnapshot 决定要不要读写快照：
+// 补充源那些「拿不到就当未知」的补充数据不落快照——每次下的是整包几百 KB，
+// 存下来只为降级不划算（见 Service.PlanetEffects）。
+func fetchWith[T any](s *Service, ctx context.Context, name string, ttl time.Duration, get func(context.Context) ([]byte, error), decode func([]byte) (T, error), keepSnapshot bool) (Result[T], error) {
 	var zero Result[T]
 	value, err := Fetch(s.cache, ctx, name, ttl, func(ctx context.Context) (T, error) {
 		var empty T
-		body, err := s.client.Get(ctx, Endpoint(name))
+		body, err := get(ctx)
 		if err != nil {
 			return empty, err
 		}
@@ -151,7 +183,7 @@ func fetch[T any](s *Service, ctx context.Context, name string, ttl time.Duratio
 		if err != nil {
 			return empty, err
 		}
-		if s.store != nil {
+		if s.store != nil && keepSnapshot {
 			if err := s.store.PutSnapshot(name, body, s.now()); err != nil {
 				// 快照只是降级用的备份，写失败不影响本次查询。
 				s.logf("写入快照失败 name=%s err=%v", name, err)
@@ -166,7 +198,7 @@ func fetch[T any](s *Service, ctx context.Context, name string, ttl time.Duratio
 		}
 		return Result[T]{Value: value, FetchedAt: at}, nil
 	}
-	if s.store == nil {
+	if s.store == nil || !keepSnapshot {
 		return zero, err
 	}
 

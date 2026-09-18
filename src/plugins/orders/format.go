@@ -22,15 +22,18 @@ func FormatAssignmentsText(card AssignmentsCard) string {
 		for _, item := range card.Items {
 			fmt.Fprintf(&b, "\n*%s*\n", bot.Escape(item.Title))
 			fmt.Fprintf(&b, "%s\n", bot.Escape(item.Briefing))
-			fmt.Fprintf(&b, "任务：%s ｜ 奖励：%s\n", bot.Escape(item.Tasks), bot.Escape(item.Reward))
-			fmt.Fprintf(&b, "截止：%s\n", bot.Escape(item.Expiration))
-			if item.Progress != "" {
-				fmt.Fprintf(&b, "进度：%s\n", bot.Escape(item.Progress))
+			// 任务一条一行：解码后的任务名（含阵营与星球）＋「当前 / 目标（百分比）」。
+			// 没有可展示的数值时只写任务名，不留一个空荡荡的分隔符。
+			for _, task := range item.Tasks {
+				if task.Numbers == "" {
+					fmt.Fprintf(&b, "任务：%s\n", bot.Escape(task.Title))
+					continue
+				}
+				fmt.Fprintf(&b, "任务：%s ｜ %s\n", bot.Escape(task.Title), bot.Escape(task.Numbers))
 			}
+			fmt.Fprintf(&b, "奖励：%s\n", bot.Escape(item.Reward))
+			fmt.Fprintf(&b, "截止：%s\n", bot.Escape(item.Expiration))
 		}
-	}
-	for _, note := range card.Notes {
-		fmt.Fprintf(&b, "%s\n", bot.Escape(note))
 	}
 	b.WriteString(plugutil.DataTimeLine(card.Meta))
 	return strings.TrimRight(b.String(), "\n")

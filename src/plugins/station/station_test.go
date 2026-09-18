@@ -60,18 +60,54 @@ func testEvents() []hd2.PlanetEvent {
 }
 
 // testStations 返回一座空间站，字段取自实测的上游 v2 响应（三项已知战术行动 + 一项未知状态）。
+// 上游的 planet 是完整对象（名字 + 星区），卡片上的「当前停靠」就取自它，样本里跟着带上。
+// 三项已知行动各带效果编号：判断「上游这次报了哪几项」靠的就是它（上游只报正在募捐/激活/冷却的那几项）。
 func testStations() []hd2.SpaceStation {
 	election := time.Date(2026, 9, 16, 12, 39, 4, 0, time.UTC)
 	return []hd2.SpaceStation{{
-		ID32:        749875195,
-		Name:        "", // 上游 v2 实测没有给 name
-		Flags:       1,
-		ElectionEnd: &election,
+		ID32:         749875195,
+		Name:         "", // 上游 v2 实测没有给 name
+		PlanetName:   "Bekvam III",
+		PlanetSector: "Sten",
+		Flags:        1,
+		ElectionEnd:  &election,
 		TacticalActions: []hd2.TacticalAction{
-			{ID32: 4091660627, Name: "EAGLE STORM", Status: 1},
-			{ID32: 3248573007, Name: "ORBITAL BLOCKADE", Status: 2},
-			{ID32: 3578080409, Name: "HEAVY ORDNANCE DISTRIBUTION", Status: 3},
+			{ID32: 4091660627, Name: "EAGLE STORM", Status: 1, EffectIDs: []int{1209, 1212, 1216}},
+			{ID32: 3248573007, Name: "ORBITAL BLOCKADE", Status: 2, EffectIDs: []int{1210, 1213, 1215}},
+			{ID32: 3578080409, Name: "HEAVY ORDNANCE DISTRIBUTION", Status: 3, EffectIDs: []int{1214, 1237}},
 			{ID32: 1, Name: "UNKNOWN ACTION", Status: 9},
+		},
+	}}
+}
+
+// testStationsWithProgress 是一座「三个阶段各一行」的空间站样本，字段取自实测的上游 v2 响应：
+// 募捐中（带捐献进度）、已激活（行动剩余）、冷却中（冷却剩余）。
+// 与 testStations 的分工：那份样本专门覆盖「未收录的行动名与状态」的兜底文案，这份覆盖进度与倒计时。
+func testStationsWithProgress() []hd2.SpaceStation {
+	election := time.Date(2026, 9, 16, 12, 39, 4, 0, time.UTC)
+	active := testFetchedAt().Add(1*time.Hour + 2*time.Minute + 33*time.Second)
+	cooling := testFetchedAt().Add(5*time.Hour + 12*time.Minute + 30*time.Second)
+	return []hd2.SpaceStation{{
+		ID32:         749875195,
+		Name:         "", // 上游 v2 实测没有给 name
+		PlanetName:   "Bekvam III",
+		PlanetSector: "Sten",
+		Flags:        1,
+		ElectionEnd:  &election,
+		TacticalActions: []hd2.TacticalAction{
+			{
+				ID32: 4091660627, Name: "EAGLE STORM", Status: 1,
+				EffectIDs: []int{1209, 1212, 1216},
+				Costs:     []hd2.TacticalCost{{TargetValue: 86400, CurrentValue: 40805.23}},
+			},
+			{
+				ID32: 3248573007, Name: "ORBITAL BLOCKADE", Status: 2,
+				EffectIDs: []int{1210, 1213, 1215}, StatusExpire: &active,
+			},
+			{
+				ID32: 3578080409, Name: "HEAVY ORDNANCE DISTRIBUTION", Status: 3,
+				EffectIDs: []int{1214, 1237}, StatusExpire: &cooling,
+			},
 		},
 	}}
 }
@@ -227,13 +263,13 @@ func TestStationsFallbackText(t *testing.T) {
 	if len(s.Replies) != 1 {
 		t.Fatalf("渲染失败应回退一条文本，实际 %d 条", len(s.Replies))
 	}
-	for _, want := range []string{"民主空间站", "飞鹰风暴", "进行中", "数据时间：2026\\-09\\-16 20:00:00"} {
-		if want == "投票" { // 「选举 / 跃迁截止」里含「选举」，这里用整段文案断言更直白
-			if !strings.Contains(s.Replies[0], "选举 / 跃迁截止：2026\\-09\\-16 20:39") {
-				t.Errorf("回退文本缺少截止时间：\n%s", s.Replies[0])
-			}
-			continue
-		}
+	for _, want := range []string{
+		"民主空间站", "飞鹰风暴", "已激活", "数据时间：2026\\-09\\-16 20:00:00",
+		"跃迁时间：2026\\-09\\-16 20:39（还有 00:39:04）", // 绝对时间 + 剩余倒计时，与卡片同一份视图模型
+		"当前停靠：", "贝克温III", "斯坦分区", // 停靠位置：星球中英名 + 星区中文名
+		"常驻被动", "行动支持", // 常驻被动一节与卡片同源
+		"飞鹰封锁", "星球轰炸", "等待募捐启动", // 上游这次没报的行动也照样列出来
+	} {
 		if !strings.Contains(s.Replies[0], want) {
 			t.Errorf("回退文本缺少 %q：\n%s", want, s.Replies[0])
 		}
@@ -410,7 +446,7 @@ func TestStationCardsSmokeWithRealBrowser(t *testing.T) {
 		card render.Card
 	}{
 		{"hd2_events_card.png", render.Card{Name: eventsCardName, Data: BuildEventsCard(testEvents(), testFetchedAt(), true)}},
-		{"hd2_stations_card.png", render.Card{Name: stationsCardName, Data: BuildStationsCard(testStations(), testFetchedAt(), false)}},
+		{"hd2_stations_card.png", render.Card{Name: stationsCardName, Data: BuildStationsCard(testStationsWithProgress(), testFetchedAt(), false)}},
 	}
 	for _, c := range cards {
 		start := time.Now()

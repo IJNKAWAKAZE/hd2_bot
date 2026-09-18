@@ -278,6 +278,22 @@ func PlanetDisplayName(name string) string {
 	return fmt.Sprintf("%s（%s）", chinese, english)
 }
 
+// CountdownText 把剩余时长排成「1天 02:33:12」；不足一天时省掉「0天」。
+// 秒位保留两位是为了和游戏内的倒计时对得上，玩家能直接拿去比对自己客户端上的时间。
+// 星球卡的保卫倒计时与空间站卡的行动/冷却剩余共用它：两处各写一份迟早会出现两种写法。
+func CountdownText(d time.Duration) string {
+	total := int64(d / time.Second)
+	if total < 0 {
+		total = 0
+	}
+	days := total / 86400
+	clock := fmt.Sprintf("%02d:%02d:%02d", (total%86400)/3600, (total%3600)/60, total%60)
+	if days > 0 {
+		return fmt.Sprintf("%d天 %s", days, clock)
+	}
+	return clock
+}
+
 // HealthText 拼血量文案「当前 / 上限」；上限缺失或为 0 时返回「—」（除零只会得到 NaN）。
 func HealthText(health, maxHealth int64) string {
 	if maxHealth <= 0 {
@@ -377,13 +393,64 @@ func normalizeFaction(faction string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(faction)), "s")
 }
 
-// tacticalNames 是已知战术行动的简中译名与卡片图标素材（逻辑名见 src/render/assets.go）。
-// 上游只给英文原名；译名与图标取自社区参照实现 astrbot_plugin_Helldivers 的 DSS 行动对照表（MIT）。
-var tacticalNames = map[string]struct{ name, icon string }{
-	"EAGLE STORM":                 {"飞鹰风暴", "tactical.eagle_storm"},
-	"ORBITAL BLOCKADE":            {"轨道封锁", "tactical.orbital_blockade"},
-	"HEAVY ORDNANCE DISTRIBUTION": {"重型军械分发", "tactical.heavy_ordnance"},
-	"ORBITAL NAPALM BARRAGE":      {"轨道燃烧弹幕", "tactical.orbital_napalm"},
+// TacticalActionSpec 是一项 DSS 战术行动的展示口径与识别依据。
+//
+// 三项数据缺一不可：
+//   - UpstreamName 是上游 /space-stations 给的英文原名（匹配用，大小写不敏感）；
+//   - Name / Icon 是卡片上的简中译名与图标素材逻辑名（素材表见 src/render/assets.go）；
+//   - EffectIDs 是这项行动对应的效果编号，用来把「上游这次报了哪几项行动」对上号：
+//     上游同一项行动会同时给 2~3 个效果编号（基础 id 与变体 id），并且「上游没有报的行动」
+//     在响应里根本不出现——而参考站的 DSS 面板是把全部行动都列出来的（没在募捐的写「等待募捐启动」）。
+type TacticalActionSpec struct {
+	UpstreamName string // 上游英文原名
+	Name         string // 简中译名
+	Icon         string // 图标素材逻辑名；空串表示本仓库没有对应素材
+	EffectIDs    []int  // 该行动对应的效果编号；nil 表示没有对照数据，无法按效果编号匹配
+}
+
+// tacticalActionSpecs 是 DSS 全部战术行动的展示顺序（照参考项目 HD2 星图页的 DSS 面板左栏）：
+// 飞鹰风暴 / 轨道封锁 / 重型军械分发 / 飞鹰封锁 / 星球轰炸。
+//
+// 译名与图标取自两处社区对照表（与本仓库的行动变量对照表同源）：
+//   - astrbot_plugin_Helldivers 的 DSS 行动对照表（MIT）：基础译名与图标；
+//   - 参考项目 HD2-Galatic_war-Map 的 tables/hd2_variables.json（tactical_action 分类）：
+//     effect_ids 对照（例如「飞鹰风暴 = 1209/1212/1216」）。
+//
+// 「飞鹰封锁」与「星球轰炸」本仓库没有独立图标，按参考站的做法复用同族素材
+// （参考站也是拿飞鹰风暴大图给飞鹰封锁、拿重型军械大图给星球轰炸）。
+// 上游哪天报了这两项，卡片就用这里的复用图标，不会留一个空位。
+var tacticalActionSpecs = []TacticalActionSpec{
+	{UpstreamName: "EAGLE STORM", Name: "飞鹰风暴", Icon: "tactical.eagle_storm", EffectIDs: []int{1209, 1212, 1216}},
+	{UpstreamName: "ORBITAL BLOCKADE", Name: "轨道封锁", Icon: "tactical.orbital_blockade", EffectIDs: []int{1210, 1213, 1215}},
+	{UpstreamName: "HEAVY ORDNANCE DISTRIBUTION", Name: "重型军械分发", Icon: "tactical.heavy_ordnance", EffectIDs: []int{1214, 1237}},
+	{UpstreamName: "EAGLE BLOCK", Name: "飞鹰封锁", Icon: "tactical.eagle_storm", EffectIDs: []int{1209, 1215}},
+	{UpstreamName: "PLANETARY BOMBARDMENT", Name: "星球轰炸", Icon: "tactical.planetary_bombardment", EffectIDs: []int{1208, 1211}},
+}
+
+// tacticalNameOnly 是「有译名、但不单独占一行」的行动。
+//
+// 上游从没有报过它们（社区对照表也没把它们算进 DSS 战术行动），所以它们**不**出现在
+// 卡片那张固定清单里——把一项游戏里并不存在的行动画成「募捐中」就是在编内容。
+// 留译名只为一件事：上游哪天真的报出来，卡片上也不会冒出一行英文。
+var tacticalNameOnly = []TacticalActionSpec{
+	{UpstreamName: "ORBITAL NAPALM BARRAGE", Name: "轨道燃烧弹幕", Icon: "tactical.orbital_napalm"},
+}
+
+// tacticalByName 是上游英文原名（大写）→ 展示口径（含只译名不占行的那些）；加载后只读。
+var tacticalByName = func() map[string]TacticalActionSpec {
+	out := make(map[string]TacticalActionSpec, len(tacticalActionSpecs)+len(tacticalNameOnly))
+	for _, spec := range append(append([]TacticalActionSpec{}, tacticalActionSpecs...), tacticalNameOnly...) {
+		out[strings.ToUpper(spec.UpstreamName)] = spec
+	}
+	return out
+}()
+
+// TacticalActions 返回全部战术行动的展示口径，顺序即卡片上的顺序。
+// 返回的是副本：调用方改这个切片不会动到包内那张表。
+func TacticalActions() []TacticalActionSpec {
+	out := make([]TacticalActionSpec, len(tacticalActionSpecs))
+	copy(out, tacticalActionSpecs)
+	return out
 }
 
 // TacticalActionName 返回战术行动的卡片展示名与图标素材（图标逻辑名见 src/render/assets.go）：
@@ -391,23 +458,73 @@ var tacticalNames = map[string]struct{ name, icon string }{
 // 上游大小写不稳定（实测同一行动大小写混用），匹配前统一折叠成大写。
 func TacticalActionName(name string) (display, icon string) {
 	trimmed := strings.TrimSpace(name)
-	if known, ok := tacticalNames[strings.ToUpper(trimmed)]; ok {
-		return known.name, known.icon
+	if known, ok := tacticalByName[strings.ToUpper(trimmed)]; ok {
+		return known.Name, known.Icon
 	}
 	return trimmed, ""
 }
 
-// TacticalStatus 把上游的 status 数字翻成文案与配色 class：
-// 0 未激活、1 准备中、2 进行中、3 冷却中；未收录的取值显示「状态 N」，不猜成某个已知状态。
-// 对照表取自社区参照实现（同一份代码库里对该字段的一致用法）；上游没有公布枚举定义。
+// currencyNames 是奖励物品的 id32 → 简中名。
+//
+// 上游 /assignments 的 reward 只给 {type, amount, id32}：type 是「奖励类别」的数字，社区也没有
+// 可对照的译名表；id32 是奖励物品本身的编号，社区站点 Helldivers Companion 的奖励表就是按 id32
+// 对照的（实测当前重要指令的奖励 id32 = 897894480）。所以卡片按 id32 认奖励，认不出来时退回原值，
+// 不去猜 type 的含义。
+//
+// 译名用游戏内简中叫法（Helldivers Companion 给的是英文原名，这里换算成中文）：
+// Warbond Medal = 勋章、Requisition Slip = 申购单、Common/Rare/Super Sample = 普通/稀有/超级样本、
+// Super Credit = 超级信用点。
+var currencyNames = map[int64]string{
+	897894480:  "勋章",
+	3608481516: "申购单",
+	3992382197: "普通样本",
+	2985106497: "稀有样本",
+	3670075867: "超级样本",
+	3481751602: "超级信用点",
+}
+
+// CurrencyName 查一个奖励物品 id32 的中文名；对照表没收录时返回 false，由调用方决定怎么显示。
+func CurrencyName(id32 int64) (string, bool) {
+	name, ok := currencyNames[id32]
+	return name, ok
+}
+
+// rewardTypeNames 是重要指令奖励的「类别编号 → 简中名」。
+//
+// 为什么要按类别认：上游主源 /assignments 的 reward 实测**只给 {type, amount}**，
+// 没有 id32（2026-09-18 实时响应：reward = {type: 1, amount: 40}）——id32 只有社区补充源
+// （Helldivers Companion）的同一份数据里才有。所以只按 id32 查表，群里的卡片永远印「数量 40（类型 1）」。
+//
+// 1 为什么是勋章（两处独立对照）：
+//   - 补充源同一时刻的同一条重要指令给的是 {type:1, id32:897894480}，而 897894480 = Warbond Medal（战争债券勋章）；
+//   - 参考实现 astrbot_plugin_Helldivers（MIT）把重要指令的 reward.amount 直接按「奖章」展示；
+//   - 游戏里重要指令的奖励本来就是战争债券勋章，没有出现过别的货币。
+//
+// 其余类别编号没有可核对的样本，一律不写：宁可退回「数量 N（类型 T）」，也不把数字猜成某个奖励名。
+var rewardTypeNames = map[int]string{
+	1: "勋章",
+}
+
+// RewardTypeName 查一个奖励类别编号（上游 reward.type）的中文名；
+// 对照表没收录时返回 false，由调用方决定怎么显示（卡片上退回上游原值）。
+func RewardTypeName(rewardType int) (string, bool) {
+	name, ok := rewardTypeNames[rewardType]
+	return name, ok
+}
+
+// TacticalStatus 把上游的 status 数字翻成文案与配色 class。
+//
+// 三阶段口径（与参考项目 HD2 星图页的 DSS 面板一致，上游没有公布枚举定义）：
+// 1 = 募捐中（正在攒捐献、还没激活）、2 = 已激活（行动生效中）、3 = 冷却中（结束后等冷却）；
+// 0 是「未激活」，未收录的取值显示「状态 N」，不猜成某个已知状态。
 func TacticalStatus(status int) (text, class string) {
 	switch status {
 	case 0:
 		return "未激活", "tag"
 	case 1:
-		return "准备中", "tag--gold"
+		return "募捐中", "tag--gold"
 	case 2:
-		return "进行中", "tag--win"
+		return "已激活", "tag--win"
 	case 3:
 		return "冷却中", "tag"
 	default:

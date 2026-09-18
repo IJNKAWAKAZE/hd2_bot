@@ -22,6 +22,7 @@ cache:
   dispatches_ttl: 600   # 战役简报
   events_ttl: 300       # 星球事件
   stations_ttl: 120     # 民主空间站
+  effects_ttl: 300     # 行动变量（补充源，只在单星球卡上展示）
 
 limit:
   rate: 4             # 每个窗口允许的请求数（上游实测上限 5 次/分钟/IP，留余量）

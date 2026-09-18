@@ -148,7 +148,7 @@ func TestDetectStationChanges(t *testing.T) {
 	prev := SnapshotOf(testInput())
 	in := testInput()
 	in.Stations[0].Flags = 2
-	in.Stations[0].TacticalActions[0].Status = 3 // 飞鹰风暴：进行中 → 冷却中
+	in.Stations[0].TacticalActions[0].Status = 3 // 飞鹰风暴：已激活 → 冷却中
 
 	got := Detect(prev, in)
 	if len(got) != 1 || got[0].Kind != KindStation {
@@ -157,7 +157,7 @@ func TestDetectStationChanges(t *testing.T) {
 	if !strings.Contains(got[0].Detail, "飞鹰风暴") {
 		t.Fatalf("应带战术行动的中文译名，实际 %q", got[0].Detail)
 	}
-	if !strings.Contains(got[0].Detail, "进行中") || !strings.Contains(got[0].Detail, "冷却中") {
+	if !strings.Contains(got[0].Detail, "已激活") || !strings.Contains(got[0].Detail, "冷却中") {
 		t.Fatalf("应说明状态变化前后，实际 %q", got[0].Detail)
 	}
 	if !strings.Contains(got[0].Detail, "1 → 2") {
@@ -252,7 +252,7 @@ func TestDetectStationActionsAddedAndRemoved(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != KindStation {
 		t.Fatalf("应检测到 1 条空间站事件，实际 %+v", got)
 	}
-	if !strings.Contains(got[0].Detail, "新增战术行动『重型军械分发』：准备中") {
+	if !strings.Contains(got[0].Detail, "新增战术行动『重型军械分发』：募捐中") {
 		t.Fatalf("应说明新增的战术行动，实际 %q", got[0].Detail)
 	}
 	if !strings.Contains(got[0].Detail, "战术行动『飞鹰风暴』已结束") {

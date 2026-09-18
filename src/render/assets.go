@@ -57,9 +57,10 @@ var assetFiles = map[string]string{
 	"tactical.eagle_storm":      "assets/game/effect/dss_eagle_storm.svg",
 	"tactical.heavy_ordnance":   "assets/game/effect/dss_heavy_ordnance.svg",
 	"tactical.orbital_blockade": "assets/game/effect/dss_orbital_blockade.svg",
-	// 上游的 DSS 战术行动里没有与「轨道燃烧弹幕」一一对应的图标，这里取同一套里语义最近的
-	// 行星轰炸，而不是继续留着自绘的红色方块图。
-	"tactical.orbital_napalm": "assets/game/effect/dss_planetary_bombardment.svg",
+	// 「星球轰炸」用的就是这颗行星轰炸图标；「轨道燃烧弹幕」在参考站里也没有一一对应的素材，
+	// 取同一套里语义最近的这张，而不是继续留着自绘的红色方块图（两个逻辑名指向同一张图）。
+	"tactical.planetary_bombardment": "assets/game/effect/dss_planetary_bombardment.svg",
+	"tactical.orbital_napalm":        "assets/game/effect/dss_planetary_bombardment.svg",
 	// 召唤指令箭头（与参考站点的 assets/arrows 同一批图形）
 	"arrow.up":    "assets/game/arrow/up.svg",
 	"arrow.down":  "assets/game/arrow/down.svg",

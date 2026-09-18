@@ -422,34 +422,60 @@
   svg.emblem--terminid { fill: var(--c-terminids); }
   svg.emblem--automaton { fill: var(--c-automaton); }
   svg.emblem--illuminate { fill: var(--c-illuminate); }
-  /* DSS follows the reference site's black HUD and striped section dividers. */
+  /* DSS follows the reference site's black HUD and striped section dividers.
+     版式（用户 2026-09-18 要求）：照参考站的 DSS 面板做「行动」列表——
+     每项行动一行卡（图标 + 名称 + 阶段与募捐进度 + 右侧百分比 + 进度条 + 时间行），
+     不做右侧那块效果详情：静态图里点不动左栏，画一张永远停在第一个效果的详情只会误导人。 */
   .dss-hud { background:#000; border:1px solid #262626; margin-top:14px; }
   .dss-top { display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:#0f0f0f; }
   .dss-top h2 { margin:0; border-left:4px solid #ffe600; padding-left:10px; font-size:19px; }
-  .dss-top > span { color:#ffe600; letter-spacing:.16em; }
+  .dss-jump { color:#ffe600; font-size:14px; letter-spacing:.06em; }
+.dss-head { display:flex; flex-direction:column; gap:4px; }
+.dss-loc { padding-left:14px; color:#9a9a9a; font-size:13px; }
   .dss-div, .dss-sec { background:repeating-linear-gradient(45deg,#1a1500 0 6px,transparent 6px 12px); }
   .dss-div { height:6px; border-block:1px solid #3a3300; }
-  .dss-grid { display:grid; grid-template-columns:minmax(0,1.2fr) minmax(0,1fr); gap:16px; padding:16px; }
+  .dss-body { padding:16px; }
   .dss-sec { margin:0 0 10px; padding:7px 10px; color:#ffe600; border:1px solid #3a3300; font-size:15px; }
-  .dss-action { display:grid; grid-template-columns:24px minmax(0,1fr) auto; gap:10px; align-items:center; background:#0f0f0f; border:1px solid #262626; padding:14px 10px; margin-top:8px; font-size:14px; }
-  .dss-icon { width:24px; height:24px; fill:#ffe600; }
-  .dss-summary { border:1px solid #262626; background:#0f0f0f; }
-  .dss-hero { display:grid; place-items:center; height:160px; background:radial-gradient(ellipse at center,#1c2635,#05070c 75%); }
-  .dss-station { width:112px; height:112px; fill:#ffe600; }
-  .dss-detail { border-top:1px solid #262626; padding:14px; }
-  .dss-detail h3 { margin:0 0 8px; font-size:13px; color:#9a9a9a; }
-  .dss-detail strong { font-size:17px; color:#ffe600; }
+  .dss-sec .n { float:right; color:#9a9a9a; font-size:13px; }
+  .dss-note { margin:0 0 10px; color:#9a9a9a; font-size:13px; }
+.dss-sec--sub { margin-top:14px; }
+.dss-passive { padding:10px 12px; background:#0d0d0d; border:1px solid #262626; }
+.dss-passive .dss-name { color:#ffe600; }
+.dss-passive p { margin:6px 0 0; color:#9a9a9a; font-size:13px; line-height:1.6; }
+  .dss-buff { display:grid; grid-template-columns:26px minmax(0,1fr) auto; gap:10px 12px; align-items:center;
+              background:#0f0f0f; border:1px solid #262626; padding:12px 14px; margin-top:8px; }
+  .dss-buff--active { border-color:#ffe600; }
+  .dss-icon { width:26px; height:26px; fill:#ffe600; }
+  .dss-name { font-size:15px; font-weight:600; }
+  .dss-sub { margin-top:4px; color:#9a9a9a; font-size:13px; }
+  .dss-time { margin-top:4px; color:#ff8c42; font-size:13px; }
+  .dss-pct { font-size:17px; color:#ffe600; }
+  .dss-bar { grid-column:1 / -1; height:6px; background:#1b1b1b; border:1px solid #333; }
+  .dss-bar__fill { height:100%; background:#ffe600; }
+  .dss-foot { border-top:1px solid #262626; padding:12px 16px; color:#9a9a9a; font-size:13px; }
   .planet-overview { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); border-bottom:1px solid var(--border); }
   .planet-detail-card .pc-landmark { height:auto; min-height:210px; border:0; }
   .planet-detail-card .pc-landmark img { position:absolute; inset:0; }
   .planet-situation { padding:16px 8px; background:#0f0f0f; }
   .planet-detail-card .pc-name { font-size:28px; white-space:normal; }
   .planet-detail { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:16px; padding:16px; }
+  /* 星球详情：战略情报分析 / 行动变量 / 兴趣点（用户 2026-09-18 要求，参照社区站点星图页）。
+     抵抗强度四档配色由 Go 侧按阈值（低 ≤1.99 / 中 2–2.99 / 高 3–3.99 / 极高 ≥4）算好 class；
+     兴趣点标签也按类别上色：指令目标＝琥珀、战役＝中性、DSS＝状态绿、敌军反攻＝警示红。 */
+  .pd-v.res-none { color: var(--text-mute); }
+  .pd-v.res-low { color: var(--ok); }
+  .pd-v.res-mid { color: var(--yellow); }
+  .pd-v.res-high { color: var(--brass); }
+  .pd-v.res-max { color: var(--warn); }
+  .pd-chip.poi-mo { color: var(--yellow); border-color: var(--yellow); }
+  .pd-chip.poi-camp { color: var(--text); border-color: var(--line-2); background: rgba(255,255,255,.04); }
+  .pd-chip.poi-dss { color: var(--ok); border-color: var(--ok); }
+  .pd-chip.poi-atk { color: var(--warn); border-color: var(--warn); }
   .planet-detail .pd-section { padding:0; border:0; min-width:0; }
   .planet-detail .pd-title { padding-bottom:8px; margin-bottom:6px; border-bottom:1px solid var(--border); }
   .planet-detail .pd-trait { border:1px dashed var(--border); background:rgba(255,255,255,.03); }
 
-  @media(max-width:600px) { .dss-grid, .planet-overview, .planet-detail { grid-template-columns:1fr; } }
+  @media(max-width:600px) { .planet-overview, .planet-detail { grid-template-columns:1fr; } }
 </style>
 </head>
 <body>
