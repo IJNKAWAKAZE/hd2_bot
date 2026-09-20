@@ -68,6 +68,10 @@ type CacheConfig struct {
 // LimitConfig 限流与重试参数。
 type LimitConfig struct {
 	Rate int `mapstructure:"rate"`
+	// Reserve 是只留给用户命令的窗口额度：后台轮询（定时推送）最多只能用 rate-Reserve 个。
+	// 默认 1（60 秒的窗口里给命令留一个）：一轮推送要连发 3 个请求，不预留的话它跑完时
+	// 同一分钟内的 /planet（最多 4 个端点）就会撞上限流。填 0 表示不预留（回到旧行为）。
+	Reserve int `mapstructure:"reserve"`
 	// Window 是滑动窗口长度；上游是 5 次/分钟，所以这里的窗口也应当是 60 秒。
 	Window        Second  `mapstructure:"window"`
 	Cooldown      Second  `mapstructure:"cooldown"`
@@ -199,6 +203,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("cache.stations_ttl", 120)
 	v.SetDefault("cache.effects_ttl", 300)
 	v.SetDefault("limit.rate", 4)
+	v.SetDefault("limit.reserve", 1)
 	// 窗口默认 60 秒：上游实测是「5 次/分钟/IP」（响应头 x-ratelimit-limit: 5，
 	// 第 6 次请求直接 429，且各端点共用一个额度）。窗口写小了等于自己把额度打爆——
 	// 实测 window=10 + rate=4（=24 次/分钟）时，连续几次请求后所有命令都会拿到 429。
@@ -256,6 +261,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Limit.Rate <= 0 {
 		errs = append(errs, errors.New("limit.rate 必须大于 0"))
+	}
+	if c.Limit.Reserve < 0 {
+		errs = append(errs, errors.New("limit.reserve 不能小于 0"))
 	}
 	if c.Limit.Window <= 0 {
 		errs = append(errs, errors.New("limit.window 必须大于 0"))

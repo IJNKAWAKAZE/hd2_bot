@@ -97,7 +97,11 @@ func run() int {
 	}
 
 	// 数据层：主源与补充源各用一个限流器（补充源不占上游额度），所有请求参数取自配置。
-	limiter := hd2.NewLimiter(cfg.Limit.Rate, cfg.Limit.Window.Duration(), cfg.Limit.Cooldown.Duration())
+	// 主源限流器给用户命令预留额度（limit.reserve）：定时推送用不完整个窗口，
+	// 命令才不会在推送刚跑完时拿到「上游接口限流中」。补充源是另一台主机、另一份额度，
+	// 且只有 /planet 会用到，所以不预留。
+	limiter := hd2.NewLimiter(cfg.Limit.Rate, cfg.Limit.Window.Duration(), cfg.Limit.Cooldown.Duration()).
+		WithReserve(cfg.Limit.Reserve)
 	client := hd2.NewClient(buildClientConfig(cfg), limiter)
 	companionLimiter := hd2.NewLimiter(cfg.Limit.Rate, cfg.Limit.Window.Duration(), cfg.Limit.Cooldown.Duration())
 	companion := hd2.NewCompanion(cfg.API.BaseCompanion, cfg.API.UserAgent,
@@ -300,7 +304,8 @@ func pushJob(spec string, collector *push.Collector, timeout time.Duration, logf
 		Name: "战况推送",
 		Spec: spec,
 		Run: func() {
-			ctx, cancel := context.WithTimeout(context.Background(), timeout)
+			// 标记为后台取数：限流器只给它 rate-reserve 个额度，把剩下的留给用户命令。
+			ctx, cancel := context.WithTimeout(hd2.WithBackground(context.Background()), timeout)
 			defer cancel()
 			if err := collector.Run(ctx); err != nil {
 				logf("战况推送失败：%v", err)

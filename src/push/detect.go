@@ -186,7 +186,12 @@ func Detect(prev Snapshot, cur Input) []Event {
 		if !known || before == sigs[id] {
 			continue
 		}
-		detail := stationDiff(before, sigs[id])
+		// 说明里的星球写名字而不是编号：「位置 星球 216 → 星球 268」在群里没人能对上号。
+		// 名字优先取本轮数据，本轮没有（星球已从列表消失等）时回落到上一轮快照记下的名字，
+		// 两处都没有才退回「星球 N」——与战役事件同一套口径（见 planetName / planetLabelOf）。
+		detail := stationDiff(before, sigs[id], func(index int) string {
+			return planetLabelOf(planetName(cur, prev, index), index)
+		})
 		if detail == "" {
 			// 中性表述：既可能是上游换了字段结构，也可能是签名本身的编码变了（例如旧版本基线），
 			// 这里没有足够信息分辨，不写死原因。
@@ -387,7 +392,9 @@ func parseStationSignature(sig string) (stationSig, bool) {
 }
 
 // stationDiff 比较两轮签名，拼出中文说明；解析失败时返回空串。
-func stationDiff(before, after string) string {
+// planetLabel 把签名里的星球编号翻成显示名（调用方传入，见 Detect 里的查表口径）；
+// 为 nil 时退回「星球 N」——空间站换位置是少见事件，但真发生时读者必须知道换到了哪颗星球。
+func stationDiff(before, after string, planetLabel func(int) string) string {
 	b, ok1 := parseStationSignature(before)
 	a, ok2 := parseStationSignature(after)
 	if !ok1 || !ok2 {
@@ -398,7 +405,7 @@ func stationDiff(before, after string) string {
 		parts = append(parts, fmt.Sprintf("标记 %s → %s", b.Flags, a.Flags))
 	}
 	if b.Planet != a.Planet {
-		parts = append(parts, fmt.Sprintf("位置 星球 %s → 星球 %s", stationPlanetText(b.Planet), stationPlanetText(a.Planet)))
+		parts = append(parts, fmt.Sprintf("位置 %s → %s", stationPlanetText(b.Planet, planetLabel), stationPlanetText(a.Planet, planetLabel)))
 	}
 	names := make([]string, 0, len(a.Actions))
 	for name := range a.Actions {
@@ -438,12 +445,17 @@ func stationDiff(before, after string) string {
 	return strings.Join(parts, "；")
 }
 
-// stationPlanetText 拼空间站所在星球的显示：上游用 0 表示「没有位置信息」。
-func stationPlanetText(index string) string {
-	if strings.TrimSpace(index) == "" || index == "0" {
+// stationPlanetText 拼空间站所在星球的显示：上游用 0 表示「没有位置信息」；
+// 有名字就用「中文（English）」，没有才退回「星球 N」（planetLabelOf 的兜底口径）。
+func stationPlanetText(index string, planetLabel func(int) string) string {
+	value, err := strconv.Atoi(strings.TrimSpace(index))
+	if err != nil || value <= 0 {
 		return plugutil.UnknownText
 	}
-	return index
+	if planetLabel == nil {
+		return planetLabelOf("", value)
+	}
+	return planetLabel(value)
 }
 
 // atoiOrZero 把状态字符串转成数字；不是数字时返回 0（会显示成「未激活」，属于可接受的退化）。

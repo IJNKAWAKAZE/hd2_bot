@@ -80,6 +80,9 @@ api:
 	if cfg.Limit.Cooldown != 20 {
 		t.Errorf("cooldown 默认值错误：%d", cfg.Limit.Cooldown)
 	}
+	if cfg.Limit.Reserve != 1 {
+		t.Errorf("reserve 默认值错误：%d", cfg.Limit.Reserve)
+	}
 	if cfg.HTTP.Port != 25555 {
 		t.Errorf("http.port 默认值错误：%d", cfg.HTTP.Port)
 	}

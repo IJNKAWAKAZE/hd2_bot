@@ -15,8 +15,16 @@ import (
 // 上游没有公开窗口长度，这里一律取保守一侧。
 // 相比固定窗口，不会在窗口边界两侧各放满一次、被上游算成成倍请求。
 // 所有上游请求（命令触发与定时轮询）共用同一个实例，避免打爆上游 5 请求/窗口的限制。
+//
+// 两类调用共用同一个额度会让定时轮询把窗口占掉一大半：默认配置下一轮推送要连发 3 个请求，
+// 而 60 秒窗口总共只有 4 个额度——推送刚跑完时用户发一条 /planet（最多要 4 个）就会撞上限流，
+// 群友看到的是「上游接口限流中」，但原因其实是机器人自己把额度用完了。
+// 因此限流器把请求分成两类（见 WithBackground / reserve）：
+//   - 用户命令（交互）：可以用满 rate 个额度；
+//   - 后台轮询：最多用 rate-reserve 个，剩下的额度始终留给命令。
 type Limiter struct {
 	rate     int           // 每个窗口允许的请求数
+	reserve  int           // 只留给交互命令的额度（后台轮询不可动用）
 	window   time.Duration // 窗口长度
 	cooldown time.Duration // 429 后的默认冷却时长
 
@@ -42,6 +50,36 @@ func NewLimiter(rate int, window, cooldown time.Duration) *Limiter {
 	return &Limiter{rate: rate, window: window, cooldown: cooldown, now: time.Now, sleep: sleepContext}
 }
 
+// WithReserve 设置留给交互命令的窗口额度（默认 0 表示不预留），返回自身以便链式调用。
+//
+// reserve 大于等于 rate 时后台轮询仍能拿到 1 个额度：把定时任务彻底饿死会让推送永远不动，
+// 那是比「慢一轮」更糟的结果（见 limitFor）。
+func (l *Limiter) WithReserve(reserve int) *Limiter {
+	if reserve < 0 {
+		reserve = 0
+	}
+	l.mu.Lock()
+	l.reserve = reserve
+	l.mu.Unlock()
+	return l
+}
+
+// backgroundKey 是「这次取数来自后台轮询」的 ctx 标记的键类型（用私有类型避免与其它包的键撞车）。
+type backgroundKey struct{}
+
+// WithBackground 标记这次取数来自后台轮询（定时推送），不是用户命令。
+// 带这个标记的请求要限流时会让出 reserve 个额度（见 Limiter.reserve）；
+// 标记随 ctx 一路传到 http 客户端的限流调用处，调用方不必改签名。
+func WithBackground(ctx context.Context) context.Context {
+	return context.WithValue(ctx, backgroundKey{}, true)
+}
+
+// IsBackground 判断这次取数是否来自后台轮询。
+func IsBackground(ctx context.Context) bool {
+	background, _ := ctx.Value(backgroundKey{}).(bool)
+	return background
+}
+
 // Wait 取得一次请求额度：窗口内已放行 rate 次时，等到最早一次放行滑出窗口再重试。
 //
 // 冷却期内（429 之后）不消耗额度：等得起就等过去，等不起就直接返回包装了 ErrRateLimited 的错误。
@@ -63,14 +101,16 @@ func (l *Limiter) Wait(ctx context.Context) error {
 			continue
 		}
 		l.pruneLocked(now)
-		if len(l.times) < l.rate {
+		limit := l.limitForLocked(ctx)
+		if len(l.times) < limit {
 			l.times = append(l.times, now)
 			l.mu.Unlock()
 			return nil
 		}
-		// 记录均未滑出窗口时，等到最早那条滑出窗口再多 1 纳秒：多出的纳秒让「正好相隔一个
-		// window」的两次放行落在不同窗口内，把闭区间不变式补严；pruneLocked 保证 wait 为正，不会空转。
-		wait := l.times[0].Add(l.window).Sub(now) + time.Nanosecond
+		// 记录均未滑出窗口时，等到「第 len(times)-limit 条」滑出窗口再多 1 纳秒：多出的纳秒让
+		// 「正好相隔一个 window」的两次放行落在不同窗口内，把闭区间不变式补严；pruneLocked 保证
+		// wait 为正，不会空转。交互调用（limit == rate）时它退化成原来的 times[0]，口径不变。
+		wait := l.times[len(l.times)-limit].Add(l.window).Sub(now) + time.Nanosecond
 		l.mu.Unlock()
 		// 额度要等到 wait 之后才有：预算不够时同样立刻报「限流中」，
 		// 而不是睡到 ctx 超时（那时错误里看不出是限流，群友只会看到一句「获取失败」）。
@@ -81,6 +121,21 @@ func (l *Limiter) Wait(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+// limitForLocked 返回这次调用可用的窗口额度：后台轮询让出 reserve 个额度给用户命令，
+// 其余调用（用户命令、启动期查询等）用满 rate。
+//
+// 后台额度最少给 1：reserve >= rate（配错了）时定时推送仍能走，只是慢一点，
+// 不会因为「一直拿不到额度」而彻底停摆。调用方需持有 l.mu（reserve 可被 WithReserve 改）。
+func (l *Limiter) limitForLocked(ctx context.Context) int {
+	if !IsBackground(ctx) || l.reserve <= 0 {
+		return l.rate
+	}
+	if limit := l.rate - l.reserve; limit > 1 {
+		return limit
+	}
+	return 1
 }
 
 // waitMargin 是「等完之后还要真发一次请求」的余量：只剩一点点预算时宁可直接快速失败，

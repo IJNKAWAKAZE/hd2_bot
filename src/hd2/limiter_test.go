@@ -45,6 +45,73 @@ func TestLimiterWaitsNextWindow(t *testing.T) {
 	}
 }
 
+// TestLimiterBackgroundReserve 校验后台轮询给用户命令让出额度：rate=4、reserve=1 时
+// 后台轮询最多取到 3 个令牌，剩下的那个始终留给命令——推送跑完时命令仍能立刻取到数据。
+func TestLimiterBackgroundReserve(t *testing.T) {
+	l, now := newTestLimiter(4, 10*time.Second, 20*time.Second)
+	l.WithReserve(1)
+	background := WithBackground(context.Background())
+	start := *now
+	for i := 0; i < 3; i++ {
+		if err := l.Wait(background); err != nil {
+			t.Fatalf("后台第 %d 次取令牌不应失败：%v", i+1, err)
+		}
+	}
+	// 预留的那个额度给命令：立刻拿到，不用等窗口。
+	if err := l.Wait(context.Background()); err != nil {
+		t.Fatalf("用户命令应能用上预留额度：%v", err)
+	}
+	if got := now.Sub(start); got != 0 {
+		t.Fatalf("预留额度应立即可用，实际等待 %v", got)
+	}
+	// 四个额度都用掉后，后台要等到最早那条记录滑出窗口（一个窗口加 1 纳秒）。
+	if err := l.Wait(background); err != nil {
+		t.Fatalf("后台取令牌失败：%v", err)
+	}
+	if got := now.Sub(start); got != 10*time.Second+time.Nanosecond {
+		t.Fatalf("窗口额度用完后应等到下个窗口，实际等待 %v", got)
+	}
+}
+
+// TestLimiterBackgroundKeepsOneSlot 校验 reserve 配得过大（≥ rate）时后台仍能取到令牌：
+// 把定时轮询彻底饿死会让推送永远不动，比「慢一轮」更糟，所以后台额度至少留 1 个。
+func TestLimiterBackgroundKeepsOneSlot(t *testing.T) {
+	l, now := newTestLimiter(1, 10*time.Second, 20*time.Second)
+	l.WithReserve(5)
+	background := WithBackground(context.Background())
+	start := *now
+	if err := l.Wait(background); err != nil {
+		t.Fatalf("后台至少应能取到一个令牌：%v", err)
+	}
+	if err := l.Wait(background); err != nil {
+		t.Fatalf("后台取令牌失败：%v", err)
+	}
+	if got := now.Sub(start); got != 10*time.Second+time.Nanosecond {
+		t.Fatalf("后台额度用完后应等到下个窗口，实际等待 %v", got)
+	}
+}
+
+// TestLimiterReserveZeroKeepsFullRate 校验不预留（reserve=0，默认值）时后台与命令同额度：旧行为不变。
+func TestLimiterReserveZeroKeepsFullRate(t *testing.T) {
+	l, _ := newTestLimiter(2, 10*time.Second, 20*time.Second)
+	background := WithBackground(context.Background())
+	for i := 0; i < 2; i++ {
+		if err := l.Wait(background); err != nil {
+			t.Fatalf("不预留额度时后台第 %d 次取令牌不应失败：%v", i+1, err)
+		}
+	}
+}
+
+// TestIsBackground 校验后台标记随 ctx 传递，没有标记的一律按交互调用对待。
+func TestIsBackground(t *testing.T) {
+	if IsBackground(context.Background()) {
+		t.Error("没有标记的 ctx 不应被判成后台轮询")
+	}
+	if !IsBackground(WithBackground(context.Background())) {
+		t.Error("WithBackground 标记后的 ctx 应判成后台轮询")
+	}
+}
+
 // TestLimiterCooldown 校验 429 后的全局冷却：没有截止时间的调用（定时轮询）会把冷却等过去，
 // 期间不消耗额度，冷却结束后照常取到令牌。
 func TestLimiterCooldown(t *testing.T) {

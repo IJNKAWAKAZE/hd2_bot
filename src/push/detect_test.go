@@ -324,6 +324,7 @@ func TestDetectCampaignTypeUnknownShowsNumber(t *testing.T) {
 }
 
 // TestDetectStationPlanetChange 校验空间站换位置也会被检测出来，且上游用 0 表示「没有位置信息」。
+// 位置写星球名而不是编号：卡面上一行「星球 216 → 星球 268」在群里没人能对上号。
 func TestDetectStationPlanetChange(t *testing.T) {
 	prev := SnapshotOf(testInput())
 	in := testInput()
@@ -332,8 +333,23 @@ func TestDetectStationPlanetChange(t *testing.T) {
 	if len(got) != 1 || got[0].Kind != KindStation {
 		t.Fatalf("应检测到 1 条空间站事件，实际 %+v", got)
 	}
-	if !strings.Contains(got[0].Detail, "位置 星球 未知 → 星球 9") {
-		t.Fatalf("应说明位置变化且把 0 写成「未知」，实际 %q", got[0].Detail)
+	if !strings.Contains(got[0].Detail, "位置 未知 → 图灵（Turing）") {
+		t.Fatalf("应说明位置变化并把 0 写成「未知」、把编号写成星球名，实际 %q", got[0].Detail)
+	}
+}
+
+// TestDetectStationPlanetChangeUnknownName 校验星球名查不到时退回「星球 N」：
+// 上游偶尔给一颗不在列表里的编号（或列表本身缺了它），这时宁可显示编号也不编名字。
+func TestDetectStationPlanetChangeUnknownName(t *testing.T) {
+	prev := SnapshotOf(testInput())
+	in := testInput()
+	in.Stations[0].PlanetIndex = 424242
+	got := Detect(prev, in)
+	if len(got) != 1 || got[0].Kind != KindStation {
+		t.Fatalf("应检测到 1 条空间站事件，实际 %+v", got)
+	}
+	if !strings.Contains(got[0].Detail, "位置 未知 → 星球 424242") {
+		t.Fatalf("查不到星球名时应退回「星球 N」，实际 %q", got[0].Detail)
 	}
 }
 
