@@ -100,6 +100,10 @@ func connectTelegram(token string) (*tgbotapi.BotAPI, error) {
 // GroupID 返回配置里指定的目标群 id。
 func (b *Bot) GroupID() int64 { return b.groupID }
 
+// TargetChatID 返回配置的目标群 id：事件来自别的群时，处理器把它和事件群一起写进日志，
+// 群 id 对不上才看得出是哪里出了岔子，而不是像卡住了。
+func (b *Bot) TargetChatID() int64 { return b.groupID }
+
 // IsTargetChat 判断会话是否是需要服务的群；groupID 为 0 时表示不限制（仅离线调试用）。
 func (b *Bot) IsTargetChat(chatID int64) bool {
 	return b.groupID == 0 || chatID == b.groupID

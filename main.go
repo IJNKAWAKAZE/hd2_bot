@@ -25,6 +25,7 @@ import (
 	"hd2_bot/src/core/web"
 	"hd2_bot/src/hd2"
 	"hd2_bot/src/plugins/codex"
+	"hd2_bot/src/plugins/gatekeeper"
 	"hd2_bot/src/plugins/orders"
 	"hd2_bot/src/plugins/planets"
 	"hd2_bot/src/plugins/station"
@@ -158,6 +159,9 @@ func run() int {
 	pluginTrans := pluginTranslator(cfg, trans)
 	registerPlugins(tgBot, svc, renderer, display, pluginTrans, gearStore, beastStore)
 
+	// 入群验证：可选功能，verify.enabled 为 true 时才注册新成员/入群申请/按钮回调三类处理器。
+	registerGatekeeper(cfg, tgBot, renderer, gearStore, log.Printf)
+
 	// 定时任务：心跳 + （可选）战况推送。推送轮询与心跳错开 15 秒，避免同一秒并发取数。
 	jobs := buildPushJobs(cfg, svc, store, tgBot, renderer, pluginTrans, display, log.Printf)
 	cronRunner := cron.New(cron.Options{Logger: log.Printf, Jobs: jobs})
@@ -220,6 +224,101 @@ func pluginHandlers(b bot.Sender, svc *hd2.Service, renderer render.Renderer, lo
 	handlers = append(handlers, station.Handlers(b, svc, renderer, loc)...)
 	handlers = append(handlers, codex.Handlers(b, gear, beasts, renderer, loc)...)
 	return handlers
+}
+
+// gatekeeperRegistrar 是入群验证装配需要的全部能力：注册三类更新、执行群成员动作、权限自检。
+// *bot.Bot 实现它；装配用例用假实现断言「开关关掉时什么都没注册」。
+type gatekeeperRegistrar interface {
+	gatekeeper.Registrar
+	gatekeeper.Telegram
+	BotRights(chatID int64) (bot.Rights, error)
+	GroupID() int64
+}
+
+// gearProvider 是入群验证需要的两项装备数据能力：目录（出题）与装备图（题面图）。
+// *arsenal.Store 同时实现两者。
+type gearProvider interface {
+	gatekeeper.CatalogProvider
+	gatekeeper.Images
+}
+
+// registerGatekeeper 装配并注册入群验证。verify.enabled 为 false 时直接返回 nil，
+// 一个处理器都不注册（关掉的功能不该在后台偷偷跑）。
+func registerGatekeeper(cfg *config.Config, tg gatekeeperRegistrar, renderer render.Renderer,
+	catalog gearProvider, logf func(string, ...any)) *gatekeeper.Handler {
+	if !cfg.Verify.Enabled {
+		return nil
+	}
+	handler := gatekeeper.New(gatekeeperConfig(cfg), gatekeeper.Deps{
+		Telegram: tg,
+		Catalog:  catalog,
+		Renderer: renderer,
+		// 题面图 = 战备图标：数据层顺手就带下载与落盘缓存（data/arsenal/images）。
+		Images: catalog,
+		Logger: logf,
+	})
+	handler.Register(tg)
+	checkVerifyRights(tg, cfg.Verify.Mode, tg.GroupID(), logf)
+	return handler
+}
+
+// gatekeeperConfig 把配置段换算成验证插件参数（秒 → time.Duration 在这里统一换算）。
+func gatekeeperConfig(cfg *config.Config) gatekeeper.Config {
+	return gatekeeper.Config{
+		Mode:            cfg.Verify.Mode,
+		ShowAnswer:      cfg.Verify.ShowAnswer,
+		Timeout:         cfg.Verify.Timeout.Duration(),
+		Attempts:        cfg.Verify.Attempts,
+		Failure:         cfg.Verify.Failure,
+		SkipInvited:     cfg.Verify.SkipInvited,
+		UnbanDelay:      cfg.Verify.UnbanDelay.Duration(),
+		Welcome:         cfg.Verify.Welcome,
+		WelcomeText:     cfg.Verify.WelcomeText,
+		WelcomeDelDelay: cfg.Verify.WelcomeDelDelay.Duration(),
+		AdWords:         cfg.Verify.AdWords,
+		AuditChannel:    cfg.Verify.AuditChannel,
+	}
+}
+
+// rightsChecker 是权限自检需要的最小能力。
+type rightsChecker interface {
+	BotRights(chatID int64) (bot.Rights, error)
+}
+
+// checkVerifyRights 在启动时确认机器人有验证需要的两项权限。
+//
+// 为什么要吼一声：缺「限制成员」权限时禁言会失败，验证对没被禁言的人毫无约束；
+// 缺「删除消息」权限时入群系统消息与验证卡片会一直留在群里。这两种情况都表现为
+// 「功能好像开了但没效果」，不主动报出来很难查。
+// checkVerifyRights 在启动时确认机器人有验证需要的权限 —— 按模式要的不一样。
+//
+// 为什么要吼一声：缺「限制成员」时禁言会失败，验证对没被禁言的人毫无约束；
+// 申请模式缺「邀请用户」时更隐蔽 —— Telegram 根本不会把入群申请发给机器人，
+// 表现就是「有人申请了但机器人毫无反应」，跟卡住了没法区分。
+func checkVerifyRights(checker rightsChecker, mode string, groupID int64, logf func(string, ...any)) {
+	if groupID == 0 {
+		logf("入群验证：未配置 bot.group_id，跳过权限自检")
+		return
+	}
+	got, err := checker.BotRights(groupID)
+	if err != nil {
+		logf("入群验证：权限自检失败（机器人可能不在群里或群 id 有误）：%v", err)
+		return
+	}
+	if !got.CanRestrict {
+		logf("入群验证：机器人缺少「限制成员」权限 —— 新成员不会被禁言，验证挡不住刷屏")
+	}
+	if !got.CanDelete {
+		logf("入群验证：机器人缺少「删除消息」权限 —— 入群系统消息与验证卡片清理不掉")
+	}
+	approval := mode == "approval"
+	if approval && !got.CanInvite {
+		logf("入群验证：机器人缺少「邀请用户」权限 —— Telegram 不会把入群申请发给机器人，" +
+			"也批准/拒绝不了申请；申请加入模式下必须勾上这项")
+	}
+	if got.CanRestrict && got.CanDelete && (!approval || got.CanInvite) {
+		logf("入群验证：权限自检通过（可限制成员、可删除消息）")
+	}
 }
 
 // registerer 是「把命令与行内查询注册到机器人上」需要的最小能力：*bot.Bot 实现它，

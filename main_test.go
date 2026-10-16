@@ -166,6 +166,177 @@ func TestRunInvalidConfigReportsAllProblems(t *testing.T) {
 	}
 }
 
+// fakeGatekeeper 是入群验证装配用例的假机器人：记录注册与权限自检，其余动作只记账不做实事。
+type fakeGatekeeper struct {
+	members        int
+	lefts          int
+	requests       int
+	callbacks      int
+	callbackPrefix string
+	rightsChecked  int
+	rights         bot.Rights
+	rightsErr      error
+	groupID        int64
+}
+
+func (f *fakeGatekeeper) RegisterMemberWatcher(func(tgbotapi.Update) error)     { f.members++ }
+func (f *fakeGatekeeper) RegisterLeftMemberWatcher(func(tgbotapi.Update) error) { f.lefts++ }
+func (f *fakeGatekeeper) RegisterJoinRequests(func(tgbotapi.Update) error)      { f.requests++ }
+func (f *fakeGatekeeper) RegisterCallback(prefix string, _ func(tgbotapi.Update) error) {
+	f.callbacks++
+	f.callbackPrefix = prefix
+}
+
+func (f *fakeGatekeeper) BotRights(int64) (bot.Rights, error) {
+	f.rightsChecked++
+	return f.rights, f.rightsErr
+}
+
+func (f *fakeGatekeeper) GroupID() int64 { return f.groupID }
+
+func (f *fakeGatekeeper) RestrictChatMember(int64, int64) error     { return nil }
+func (f *fakeGatekeeper) UnrestrictChatMember(int64, int64) error   { return nil }
+func (f *fakeGatekeeper) BanMember(int64, int64) error              { return nil }
+func (f *fakeGatekeeper) ApproveJoinRequest(int64, int64) error     { return nil }
+func (f *fakeGatekeeper) DeclineJoinRequest(int64, int64) error     { return nil }
+func (f *fakeGatekeeper) UnbanMember(int64, int64) error            { return nil }
+func (f *fakeGatekeeper) MemberIsAdmin(int64, int64) (bool, error) {
+	return false, nil
+}
+func (f *fakeGatekeeper) UserBio(int64) string { return "" }
+func (f *fakeGatekeeper) SendText(int64, string) error {
+	return nil
+}
+func (f *fakeGatekeeper) SendTemporaryText(int64, string, time.Duration) error { return nil }
+func (f *fakeGatekeeper) AnswerCallback(string, string, bool) {}
+func (f *fakeGatekeeper) DeleteMessage(int64, int64) error { return nil }
+func (f *fakeGatekeeper) IsTargetChat(int64) bool { return true }
+func (f *fakeGatekeeper) TargetChatID() int64 { return f.groupID }
+func (f *fakeGatekeeper) SendPhotoID(int64, []byte, int64) (int64, error) { return 1, nil }
+func (f *fakeGatekeeper) SendTextWithKeyboardID(int64, string, tgbotapi.InlineKeyboardMarkup) (int64, error) {
+	return 1, nil
+}
+func (f *fakeGatekeeper) EditText(int64, int64, string, tgbotapi.InlineKeyboardMarkup) error {
+	return nil
+}
+
+// TestRegisterGatekeeperDisabledDoesNothing 校验关掉开关时一个处理器都不注册、也不自检权限：
+// 关掉的功能不该在后台偷偷跑。
+func TestRegisterGatekeeperDisabledDoesNothing(t *testing.T) {
+	fake := &fakeGatekeeper{groupID: -100}
+	cfg := &config.Config{}
+	logs := captureLogs(t)
+
+	if handler := registerGatekeeper(cfg, fake, nil, nil, log.Printf); handler != nil {
+		t.Fatal("未启用时应返回 nil")
+	}
+	if fake.members != 0 || fake.requests != 0 || fake.callbacks != 0 || fake.rightsChecked != 0 {
+		t.Fatalf("未启用时不该注册处理器或自检权限：%+v", fake)
+	}
+	if strings.Contains(logs(), "入群验证") {
+		t.Errorf("未启用时不该有入群验证相关日志：%s", logs())
+	}
+}
+
+// TestRegisterGatekeeperEnabled 校验打开后三类处理器都注册、权限自检跑了一次、日志按权限缺失情况给提示。
+func TestRegisterGatekeeperEnabled(t *testing.T) {
+	fake := &fakeGatekeeper{groupID: -100, rights: bot.Rights{CanRestrict: true, CanDelete: true, CanInvite: true}}
+	cfg := &config.Config{}
+	cfg.Verify.Enabled = true
+	cfg.Verify.Mode = "approval"
+	cfg.Verify.Timeout = 180
+	logs := captureLogs(t)
+
+	handler := registerGatekeeper(cfg, fake, nil, nil, log.Printf)
+	if handler == nil {
+		t.Fatal("启用时应返回处理器")
+	}
+	if fake.members != 1 || fake.lefts != 1 || fake.requests != 1 || fake.callbacks != 1 {
+		t.Fatalf("四类更新都应注册：%+v", fake)
+	}
+	if fake.callbackPrefix != "verify" {
+		t.Errorf("回调前缀应为 verify，实际 %q", fake.callbackPrefix)
+	}
+	if fake.rightsChecked != 1 {
+		t.Errorf("应做一次权限自检，实际 %d 次", fake.rightsChecked)
+	}
+	if !strings.Contains(logs(), "权限自检通过") {
+		t.Errorf("权限齐全时应记一条通过日志：%s", logs())
+	}
+}
+
+// TestCheckVerifyRightsWarnsOnMissingPermissions 校验缺权限时会把后果写清楚
+// （这些情况都表现为「开了但没效果」，必须主动报出来）。
+func TestCheckVerifyRightsWarnsOnMissingPermissions(t *testing.T) {
+	logs := captureLogs(t)
+	fake := &fakeGatekeeper{groupID: -100, rights: bot.Rights{}}
+	checkVerifyRights(fake, "direct", -100, log.Printf)
+	got := logs()
+	if !strings.Contains(got, "限制成员") || !strings.Contains(got, "删除消息") {
+		t.Fatalf("缺两项权限都应提示，实际：%s", got)
+	}
+	if strings.Contains(got, "邀请用户") {
+		t.Errorf("direct 模式用不到邀请用户权限，不该提示：%s", got)
+	}
+
+	// 申请模式额外要求「邀请用户」：Telegram 规定机器人没有它就收不到入群申请，
+	// 也批准/拒绝不了 —— 表现就是「申请了但机器人毫无反应」。
+	logs = captureLogs(t)
+	checkVerifyRights(&fakeGatekeeper{groupID: -100, rights: bot.Rights{CanRestrict: true, CanDelete: true}}, "approval", -100, log.Printf)
+	if got := logs(); !strings.Contains(got, "邀请用户") || !strings.Contains(got, "入群申请") {
+		t.Fatalf("申请模式缺邀请用户权限必须点名后果，实际：%s", got)
+	}
+
+	// 申请模式权限齐全（含邀请用户）才说「通过」。
+	logs = captureLogs(t)
+	checkVerifyRights(&fakeGatekeeper{groupID: -100, rights: bot.Rights{CanRestrict: true, CanDelete: true, CanInvite: true}}, "approval", -100, log.Printf)
+	if got := logs(); !strings.Contains(got, "权限自检通过") {
+		t.Fatalf("权限齐全时应记通过日志，实际：%s", got)
+	}
+
+	// 没配群 id 时跳过自检（离线调试用）。
+	logs = captureLogs(t)
+	fake = &fakeGatekeeper{groupID: 0}
+	checkVerifyRights(fake, "direct", 0, log.Printf)
+	if !strings.Contains(logs(), "跳过权限自检") {
+		t.Errorf("未配置群 id 时应说明跳过：%s", logs())
+	}
+
+	// 自检本身失败（机器人不在群里）也要给可读提示。
+	logs = captureLogs(t)
+	checkVerifyRights(&fakeGatekeeper{groupID: -100, rightsErr: errors.New("chat not found")}, "direct", -100, log.Printf)
+	if !strings.Contains(logs(), "权限自检失败") {
+		t.Errorf("自检失败应记日志：%s", logs())
+	}
+}
+
+// captureLogs 把标准 logger 的输出暂时收集到内存，返回读取函数。
+// 用完必须恢复：其它用例也在往同一个 logger 写。
+func captureLogs(t *testing.T) func() string {
+	t.Helper()
+	var (
+		mu  sync.Mutex
+		buf bytes.Buffer
+	)
+	previous := log.Writer()
+	log.SetOutput(writerFunc(func(p []byte) (int, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.Write(p)
+	}))
+	t.Cleanup(func() { log.SetOutput(previous) })
+	return func() string {
+		mu.Lock()
+		defer mu.Unlock()
+		return buf.String()
+	}
+}
+
+// writerFunc 让一个函数满足 io.Writer。
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
+
 // TestShutdownStepsReleaseEverythingInOrder 验证停机序列的顺序与覆盖面：
 // 每停机一步，HTTP 服务与状态文件都必须被关闭，且状态文件最后关闭。
 func TestShutdownStepsReleaseEverythingInOrder(t *testing.T) {

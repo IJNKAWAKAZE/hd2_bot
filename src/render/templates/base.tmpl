@@ -318,6 +318,16 @@
      所以这里只管盒子与着色。 */
   .summon__arrow { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 24px; color: #F2F2F2; background: var(--panel-2); border: 1px solid var(--line-2); }
   .summon__arrow svg { display: block; width: 15px; height: 15px; fill: #F2F2F2; }
+  /* 入群验证卡片的「呼叫演练」题面：上（战备图）中（中文名）下（召唤指令）三段，居中排布。
+     .card--bare 是「没有标题信息」的卡片走的外壳形态：只加一圈细描边把卡片与群背景分开。 */
+  .card--bare { border: 2px solid var(--border-h); }
+  .drillcard { display: flex; flex-direction: column; align-items: center; gap: 18px; padding: 10px 0 6px; }
+  .drillcard__figure { display: flex; align-items: center; justify-content: center; width: 300px; height: 300px; padding: 16px; background: var(--panel-2); border: 1px solid var(--border); }
+  .drillcard__figure img { display: block; width: 100%; height: 100%; object-fit: contain; }
+  .drillcard__name { font-family: var(--font-title); font-size: 34px; line-height: 1.2; letter-spacing: .04em; text-align: center; color: #FFFFFF; }
+  .drillcard__steps { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+  .drillcard__step { display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 52px; font-size: 26px; color: var(--yellow); background: var(--panel-2); border: 2px solid var(--brass); }
+  .drillcard__step svg { display: block; width: 28px; height: 28px; fill: var(--yellow); }
   /* 行标题：标签弱化 + 内容正文。 */
   .line { margin-top: 6px; font-size: 12.5px; color: var(--text-dim); }
   .line__k { margin-right: 8px; color: var(--text-mute); }
@@ -479,8 +489,10 @@
 </style>
 </head>
 <body>
-<div class="card">
-  <header class="card__header">
+{{/* 标题栏只在「有标题信息」时才画：五项全空的卡片（例如入群验证的题面图）只留内容区。 */}}
+{{$head := or .Title .Subtitle .Emblem .DataTime .Stale}}
+<div class="card{{if not $head}} card--bare{{end}}">
+  {{if $head}}<header class="card__header">
     {{if .Emblem}}{{icon .Emblem "card__emblem"}}{{end}}
     <div class="card__titles">
       <h1 class="card__title">{{.Title}}</h1>
@@ -490,7 +502,7 @@
       {{if .DataTime}}<div>数据时间 {{.DataTime}}</div>{{end}}
       {{if .Stale}}<div class="card__stale">⚠ 数据可能已过期</div>{{end}}
     </div>
-  </header>
+  </header>{{end}}
   <main class="card__body">{{template "body" .}}</main></div>
 </body>
 </html>

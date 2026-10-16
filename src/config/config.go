@@ -29,6 +29,7 @@ type Config struct {
 	Render    RenderConfig    `mapstructure:"render"`
 	Translate TranslateConfig `mapstructure:"translate"`
 	Push      PushConfig      `mapstructure:"push"`
+	Verify    VerifyConfig    `mapstructure:"verify"`
 	Arsenal   ArsenalConfig   `mapstructure:"arsenal"`
 	Bestiary  BestiaryConfig  `mapstructure:"bestiary"`
 }
@@ -143,6 +144,43 @@ type ArsenalConfig struct {
 	Mirror string `mapstructure:"mirror"`
 }
 
+// VerifyConfig 是入群验证（gatekeeper）的配置：默认关闭，关掉时整个功能不注册任何处理器。
+//
+// 两种模式对应群的两种加群设置：
+//   - direct：群为「直接加入」，新成员进群后机器人先禁言、再在群里发题面与提示；
+//   - approval：群为「申请加入」，机器人收到入群申请后私聊发题面与提示，通过才批准。
+//
+// 没有「自动」档：两种流程差别很大（一个要禁言、一个要 approveChatJoinRequest），
+// 猜错的后果是把验证发到错误的会话里（群里没人被禁言 / 私聊根本发不出去），不如让人写清楚。
+type VerifyConfig struct {
+	Enabled bool   `mapstructure:"enabled"` // 总开关
+	Mode    string `mapstructure:"mode"`    // direct | approval
+	// Challenge 是验证形式；目前只有 code（呼叫演练：按顺序点出战备的召唤指令）。
+	Challenge string `mapstructure:"challenge"`
+	// ShowAnswer 为 true 时把召唤指令印在题面图上（照抄即可，不劝退新兵）；
+	// 为 false 时只给战备名，凭记忆点 —— 硬核模式。
+	ShowAnswer bool   `mapstructure:"show_answer"`
+	Timeout    Second `mapstructure:"timeout"`  // 验证超时（秒），超时按失败处理
+	Attempts   int    `mapstructure:"attempts"` // 允许答错的次数，超过即失败
+	Failure    string `mapstructure:"failure"`  // kick（踢出，还能重新申请）| ban（封禁）
+	// SkipInvited 为 true 时，被其它成员邀请入群的人免验证（只有自己点链接进群的才验证）。
+	SkipInvited bool `mapstructure:"skip_invited"`
+	// UnbanDelay 是踢出后过多久解封（秒）；0 表示立刻解封。
+	// 留一点延迟是给「秒回」一点阻力，也让管理员有时间看到记录后手动封禁。
+	UnbanDelay Second `mapstructure:"unban_delay"`
+	// Welcome 为 true 时，通过验证后在群里发一条文本欢迎。
+	Welcome bool `mapstructure:"welcome"`
+	// WelcomeText 是自定义欢迎文案，可用 {mention}（@他）与 {name}（昵称）两个占位符；
+	// 留空用内置文案。按 MarkdownV2 发送，写普通文字即可，不用自己转义。
+	WelcomeText string `mapstructure:"welcome_text"`
+	// WelcomeDelDelay 是欢迎消息的自动删除延迟（秒）；0 表示不删。
+	WelcomeDelDelay Second `mapstructure:"welcome_del_delay"`
+	// AdWords 是昵称/简介里命中就直接拦下的关键词；留空用内置表（TG、加v、返佣…）。
+	AdWords []string `mapstructure:"ad_words"`
+	// AuditChannel 是审计日志频道 id（把入群/拒绝事件也发一份到频道）；0 表示只写本地日志。
+	AuditChannel int64 `mapstructure:"audit_channel"`
+}
+
 // BestiaryConfig 是敌人图鉴（/enemy）的数据层配置。
 type BestiaryConfig struct {
 	Dir     string `mapstructure:"dir"`      // 缓存目录，留空用 data/bestiary
@@ -243,6 +281,19 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("push.enabled", true)
 	v.SetDefault("push.cron", "15 */5 * * * *")
 	v.SetDefault("push.max_items", 5)
+	v.SetDefault("verify.enabled", false)
+	v.SetDefault("verify.mode", "direct")
+	v.SetDefault("verify.challenge", "code")
+	v.SetDefault("verify.show_answer", true)
+	v.SetDefault("verify.timeout", 180)
+	v.SetDefault("verify.attempts", 1)
+	v.SetDefault("verify.failure", "kick")
+	v.SetDefault("verify.skip_invited", true)
+	v.SetDefault("verify.unban_delay", 60)
+	v.SetDefault("verify.welcome", true)
+	v.SetDefault("verify.welcome_text", "")
+	v.SetDefault("verify.welcome_del_delay", 0)
+	v.SetDefault("verify.audit_channel", 0)
 	v.SetDefault("arsenal.dir", "data/arsenal")
 	v.SetDefault("arsenal.ttl", 86400)
 	v.SetDefault("arsenal.timeout", 30)
@@ -430,7 +481,79 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// 入群验证段：关闭时字段不再校验（别人可能先填好配置、等群里设置改好了再打开）。
+	if c.Verify.Enabled {
+		c.Verify.Mode = normalizeChoice(c.Verify.Mode, "direct")
+		c.Verify.Challenge = normalizeChoice(c.Verify.Challenge, "code")
+		c.Verify.Failure = normalizeChoice(c.Verify.Failure, "kick")
+		switch c.Verify.Mode {
+		case "direct", "approval":
+		case "auto":
+			errs = append(errs, errors.New("verify.mode 不再支持 auto：请按群的加群设置写 direct（直接加入）或 approval（申请加入）"))
+		default:
+			errs = append(errs, fmt.Errorf("verify.mode 只能是 direct 或 approval，实际为 %q", c.Verify.Mode))
+		}
+		switch c.Verify.Challenge {
+		case "code":
+		default:
+			errs = append(errs, fmt.Errorf("verify.challenge 目前只支持 code（呼叫演练），实际为 %q", c.Verify.Challenge))
+		}
+		switch c.Verify.Failure {
+		case "kick", "ban":
+		default:
+			errs = append(errs, fmt.Errorf("verify.failure 只能是 kick 或 ban，实际为 %q", c.Verify.Failure))
+		}
+		if c.Verify.Timeout <= 0 {
+			errs = append(errs, errors.New("verify.timeout 必须大于 0（秒）"))
+		} else if c.Verify.Timeout > maxVerifyTimeout {
+			// 上限不是技术限制，而是运营约束：验证卡片在群里挂太久等于没人管。
+			errs = append(errs, fmt.Errorf("verify.timeout 不能超过 %d 秒（验证卡片在群里挂太久就是没人管）", int(maxVerifyTimeout)))
+		}
+		if c.Verify.Attempts < 0 || c.Verify.Attempts > maxVerifyAttempts {
+			errs = append(errs, fmt.Errorf("verify.attempts 应在 0 到 %d 之间（0 表示一次都不许错）", maxVerifyAttempts))
+		}
+		if c.Verify.UnbanDelay < 0 || c.Verify.UnbanDelay > maxVerifyTimeout {
+			errs = append(errs, fmt.Errorf("verify.unban_delay 应在 0 到 %d 秒之间（0 表示立刻解封）", int(maxVerifyTimeout)))
+		}
+		if c.Verify.WelcomeDelDelay < 0 || c.Verify.WelcomeDelDelay > maxVerifyTimeout {
+			errs = append(errs, fmt.Errorf("verify.welcome_del_delay 应在 0 到 %d 秒之间（0 表示不删除）", int(maxVerifyTimeout)))
+		}
+		c.Verify.WelcomeText = strings.TrimSpace(c.Verify.WelcomeText)
+		c.Verify.AdWords = trimNonEmpty(c.Verify.AdWords)
+	}
+
 	return errors.Join(errs...)
+}
+
+// 入群验证的取值上限：超时最多 1 小时，答错次数最多 5 次。
+const (
+	maxVerifyTimeout  Second = 3600
+	maxVerifyAttempts        = 5
+)
+
+// normalizeChoice 归一化枚举取值：大小写与空白不敏感，留空用默认值。
+// 取值合法性由 Validate 判定，这里只保证 "KICK"、" kick " 这类写法能被认出来。
+func normalizeChoice(value, fallback string) string {
+	trimmed := strings.ToLower(strings.TrimSpace(value))
+	if trimmed == "" {
+		return fallback
+	}
+	return trimmed
+}
+
+// trimNonEmpty 去掉首尾空白并丢弃空串与重复项，保持原有顺序。
+func trimNonEmpty(values []string) []string {
+	out := make([]string, 0, len(values))
+	seen := make(map[string]bool, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" || seen[trimmed] {
+			continue
+		}
+		seen[trimmed] = true
+		out = append(out, trimmed)
+	}
+	return out
 }
 
 // normalizeArsenalSource 归一化数据源取值：大小写与空白不敏感，留空用默认源。

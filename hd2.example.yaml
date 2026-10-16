@@ -78,3 +78,19 @@ push:
   enabled: true
   cron: "15 */5 * * * *"     # 与心跳（整 5 分钟）错开，避免同一秒并发取数
   max_items: 5               # 每节最多列几条
+
+verify:                      # 入群验证（呼叫演练）：新成员按顺序点出战备的召唤指令
+  enabled: false             # 总开关；关掉时一个处理器都不注册
+  mode: direct               # direct＝群为「直接加入」走群内验证 | approval＝群为「申请加入」走私聊验证（没有自动档）
+  challenge: code            # 验证形式：code＝呼叫演练（按顺序点召唤指令）；目前只有这一种
+  show_answer: true          # true＝题面图上印出召唤指令（照抄即可）；false＝只给战备名，凭记忆点
+  timeout: 180               # 验证超时（秒），超时按失败处理；最长 3600
+  attempts: 1                # 允许点错的次数（0＝一次都不许错）
+  failure: kick              # kick＝踢出（还能重新申请）| ban＝封禁
+  skip_invited: true         # true＝被其它成员拉进群的人免验证；false＝不管谁拉的都要验证
+  unban_delay: 60            # 踢出后隔多少秒解封（参考项目用 1 分钟）；0＝立刻解封
+  welcome: true              # 通过验证后是否在群里发一条文本欢迎
+  welcome_text: ""           # 自定义欢迎文案，可用 {mention}（@他）与 {name}（昵称）；留空用内置
+  welcome_del_delay: 0       # 欢迎消息自动删除延迟（秒）；0＝不删
+  ad_words: []               # 昵称/简介命中即拦；留空用内置表（TG 引流、加v、返佣、刷单…）
+  audit_channel: 0           # 审计日志频道 id（把入群/踢出事件也发一份）；0＝只写日志

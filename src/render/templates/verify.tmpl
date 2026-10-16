@@ -1,0 +1,16 @@
+{{- /* verify 是入群验证的题面图，只有上中下三段：战备图 / 战备中文名 / 召唤指令。
+       视图模型是 gatekeeper.Card，走裸卡模式（Meta.Bare=true，外壳不画标题栏与数据时间）；
+       谁、限时、进度、剩余机会都在旁边那条提示文本上，点按钮只会改文本，这张图不动。
+       ShowSteps 为 false（verify.show_answer=false）时第三段不画指令，凭记忆点。
+       样式见 base.tmpl 的 .drillcard*（.card--bare 负责那圈描边）。 */ -}}
+{{define "body"}}
+<div class="drillcard">
+  {{if .Image}}<div class="drillcard__figure"><img src="{{dataimg .Image}}" alt=""></div>{{end}}
+  <div class="drillcard__name">{{.TargetName}}</div>
+  {{if .ShowSteps}}
+  <div class="drillcard__steps">
+    {{range .Steps}}<span class="drillcard__step">{{if .Asset}}{{icon .Asset}}{{else}}{{.Glyph}}{{end}}</span>{{end}}
+  </div>
+  {{end}}
+</div>
+{{end}}

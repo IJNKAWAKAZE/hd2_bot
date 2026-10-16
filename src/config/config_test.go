@@ -633,3 +633,112 @@ func TestArsenalMirrorDashIsKept(t *testing.T) {
 		t.Errorf("arsenal.mirror 填 \"-\" 时应归一化成 -，实际 %q", cfg.Arsenal.Mirror)
 	}
 }
+
+// TestVerifyConfigDefaults 校验入群验证默认是关的，且其余字段都有可直接用的默认值
+// （打开开关就能跑，不用先把每个字段都填一遍）。
+func TestVerifyConfigDefaults(t *testing.T) {
+	cfg := loadFromYAML(t, minYAML)
+	if cfg.Verify.Enabled {
+		t.Error("verify.enabled 默认应为 false：入群验证是可开关的功能，默认不打扰群")
+	}
+	if cfg.Verify.Mode != "direct" {
+		t.Errorf("verify.mode 默认应为 direct（群默认是「直接加入」），实际 %q", cfg.Verify.Mode)
+	}
+	if cfg.Verify.Challenge != "code" {
+		t.Errorf("verify.challenge 默认应为 code（呼叫演练），实际 %q", cfg.Verify.Challenge)
+	}
+	if !cfg.Verify.ShowAnswer {
+		t.Error("verify.show_answer 默认应为 true：题面图上印出召唤指令，新兵照抄就能过")
+	}
+	if cfg.Verify.Timeout != 180 {
+		t.Errorf("verify.timeout 默认应为 180 秒，实际 %v", cfg.Verify.Timeout)
+	}
+	if cfg.Verify.Attempts != 1 {
+		t.Errorf("verify.attempts 默认应为 1（允许点错一次），实际 %d", cfg.Verify.Attempts)
+	}
+	if cfg.Verify.Failure != "kick" {
+		t.Errorf("verify.failure 默认应为 kick（踢出，还能重新申请），实际 %q", cfg.Verify.Failure)
+	}
+	if !cfg.Verify.SkipInvited {
+		t.Error("verify.skip_invited 默认应为 true：被成员拉进群的人免验证")
+	}
+	if cfg.Verify.UnbanDelay != 60 {
+		t.Errorf("verify.unban_delay 默认应为 60 秒（踢出后隔一分钟解封），实际 %v", cfg.Verify.UnbanDelay)
+	}
+	if !cfg.Verify.Welcome {
+		t.Error("verify.welcome 默认应为 true：通过验证后发一条文本欢迎")
+	}
+	if cfg.Verify.WelcomeText != "" {
+		t.Errorf("verify.welcome_text 默认应为空（用内置文案），实际 %q", cfg.Verify.WelcomeText)
+	}
+	if cfg.Verify.WelcomeDelDelay != 0 {
+		t.Errorf("verify.welcome_del_delay 默认应为 0（不删除欢迎消息），实际 %v", cfg.Verify.WelcomeDelDelay)
+	}
+	if cfg.Verify.AuditChannel != 0 {
+		t.Errorf("verify.audit_channel 默认应为 0（只写日志），实际 %d", cfg.Verify.AuditChannel)
+	}
+}
+
+// TestVerifyValidation 校验非法取值会被拦住，且错误信息带字段名。
+func TestVerifyValidation(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+		want string
+	}{
+		{"mode 不认识", "verify:\n  enabled: true\n  mode: sometimes\n", "verify.mode"},
+		{"mode 还写 auto", "verify:\n  enabled: true\n  mode: auto\n", "不再支持 auto"},
+		{"challenge 还没实现", "verify:\n  enabled: true\n  challenge: quiz\n", "verify.challenge"},
+		{"failure 不认识", "verify:\n  enabled: true\n  failure: mute\n", "verify.failure"},
+		{"timeout 为 0", "verify:\n  enabled: true\n  timeout: 0\n", "verify.timeout"},
+		{"timeout 太长", "verify:\n  enabled: true\n  timeout: 7200\n", "verify.timeout"},
+		{"attempts 为负", "verify:\n  enabled: true\n  attempts: -1\n", "verify.attempts"},
+		{"attempts 太大", "verify:\n  enabled: true\n  attempts: 9\n", "verify.attempts"},
+		{"unban_delay 为负", "verify:\n  enabled: true\n  unban_delay: -1\n", "verify.unban_delay"},
+		{"unban_delay 太长", "verify:\n  enabled: true\n  unban_delay: 7200\n", "verify.unban_delay"},
+		{"welcome_del_delay 为负", "verify:\n  enabled: true\n  welcome_del_delay: -5\n", "verify.welcome_del_delay"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := validateFromYAML(t, minYAML+"\n"+c.yaml)
+			if err == nil {
+				t.Fatalf("非法配置应报错：\n%s", c.yaml)
+			}
+			if !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("错误信息应包含字段名 %q，实际：%v", c.want, err)
+			}
+		})
+	}
+}
+
+// TestVerifyDisabledSkipsValidation 校验关掉开关时字段不再校验：
+// 常见用法是先把配置写全、等群里设置改好了再打开。
+func TestVerifyDisabledSkipsValidation(t *testing.T) {
+	if err := validateFromYAML(t, minYAML+"\nverify:\n  enabled: false\n  mode: sometimes\n  timeout: 0\n  attempts: -3\n"); err != nil {
+		t.Fatalf("关闭时不该校验 verify 段：%v", err)
+	}
+}
+
+// TestVerifyNormalization 校验枚举折叠大小写与空白、广告词去重去空。
+func TestVerifyNormalization(t *testing.T) {
+	cfg := loadFromYAML(t, minYAML+`
+verify:
+  enabled: true
+  mode: "  APPROVAL "
+  challenge: " Code "
+  failure: " BAN "
+  ad_words: [" 代练 ", "代练", "", "本群专属"]
+`)
+	if cfg.Verify.Mode != "approval" {
+		t.Errorf("mode 应折叠大小写与空白，实际 %q", cfg.Verify.Mode)
+	}
+	if cfg.Verify.Challenge != "code" {
+		t.Errorf("challenge 应折叠大小写与空白，实际 %q", cfg.Verify.Challenge)
+	}
+	if cfg.Verify.Failure != "ban" {
+		t.Errorf("failure 应折叠大小写与空白，实际 %q", cfg.Verify.Failure)
+	}
+	if len(cfg.Verify.AdWords) != 2 || cfg.Verify.AdWords[0] != "代练" || cfg.Verify.AdWords[1] != "本群专属" {
+		t.Errorf("广告词应去空白、去重、去空串，实际 %v", cfg.Verify.AdWords)
+	}
+}

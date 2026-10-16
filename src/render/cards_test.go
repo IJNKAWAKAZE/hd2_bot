@@ -187,6 +187,45 @@ func TestCardShellHasNoSourceFooter(t *testing.T) {
 	}
 }
 
+// TestCardShellSkipsHeaderWithoutTitleInfo 校验外壳的固定规则：
+// 标题、副标题、徽标、数据时间、过期角标全都为空时，不画标题栏（入群验证的题面图靠它做到「只有三段」）；
+// 只要有一项非空，标题栏照旧。
+//
+// 断言看的是**标记**（<header class="card__header">）而不是样式表里的类名：样式在两种形态下都在。
+func TestCardShellSkipsHeaderWithoutTitleInfo(t *testing.T) {
+	const headerTag = `<header class="card__header">`
+
+	bare, err := render.HTML(render.Card{Name: "smoke", Data: render.SmokeCard{Meta: render.Meta{}}})
+	if err != nil {
+		t.Fatalf("渲染冒烟卡片 HTML 失败：%v", err)
+	}
+	if strings.Contains(bare, headerTag) {
+		t.Error("没有任何标题信息时不该画标题栏")
+	}
+	if !strings.Contains(bare, `class="card card--bare"`) {
+		t.Error("无标题信息时应走 .card--bare 形态（只留内容区与描边）")
+	}
+
+	for _, meta := range []render.Meta{
+		{Title: "有标题"},
+		{Subtitle: "只有副标题"},
+		{DataTime: "2026-10-16 12:00"},
+		{Stale: true},
+		{Emblem: "emblem.super_earth"},
+	} {
+		html, err := render.HTML(render.Card{Name: "smoke", Data: render.SmokeCard{Meta: meta}})
+		if err != nil {
+			t.Fatalf("渲染冒烟卡片 HTML 失败：%v", err)
+		}
+		if !strings.Contains(html, headerTag) {
+			t.Errorf("标题信息非空时应画标题栏：%+v", meta)
+		}
+		if strings.Contains(html, "card--bare") && !strings.Contains(html, "card__header") {
+			t.Errorf("有标题信息时不该走裸卡形态：%+v", meta)
+		}
+	}
+}
+
 // TestCardSkinKeepsHardEdges 校验皮肤基线（零圆角 / 零阴影 / 琥珀强调）没有被无意改回去。
 // 这条用例盯的是 base.tmpl 的皮肤约定，不是某一类卡片：卡片样式只在 base.tmpl 里维护。
 func TestCardSkinKeepsHardEdges(t *testing.T) {

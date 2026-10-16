@@ -37,6 +37,9 @@ type Card struct {
 
 // Meta 是卡片外壳需要的公共字段；卡片视图模型内嵌它即可满足 CardShell，
 // base.tmpl 里的 .Title / .Subtitle / .DataTime / .Stale / .Emblem 都来自这里。
+//
+// 五个字段全空时外壳不画标题栏、只留内容区（见 base.tmpl）：这是给「内容本身就是全部信息」
+// 的卡片留的固定规则（例如入群验证的题面图），不是开关 —— 有标题就画头，没标题就不画。
 type Meta struct {
 	Title    string // 卡片标题，例如「银河战况」
 	Subtitle string // 可选副标题，空串不显示
