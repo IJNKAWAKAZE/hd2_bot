@@ -372,6 +372,10 @@ func (h *Handler) OnCallback(update tgbotapi.Update) error {
 	switch action {
 	case "pass", "ban":
 		return h.handleAdminAction(query, session, action)
+	case noopAction:
+		// 九宫格的空位：只把按钮的加载状态应答掉，验证状态一点都不动。
+		h.telegram.AnswerCallback(query.ID, "", false)
+		return nil
 	case DirUp, DirDown, DirLeft, DirRight:
 		if query.From.ID != userID {
 			h.telegram.AnswerCallback(query.ID, "这不是你的验证。", true)

@@ -25,6 +25,26 @@ type sentMessage struct {
 	Text      string
 	Caption   string
 	Buttons   int
+	// Rows 记下每一行按钮的文案（空位记成 ""），用来断言九宫格的摆位。
+	Rows [][]string
+}
+
+// buttonRows 把键盘转成「每行按钮文案」的形状，空位统一记成 ""。
+func buttonRows(markup tgbotapi.InlineKeyboardMarkup) [][]string {
+	rows := make([][]string, 0, len(markup.InlineKeyboard))
+	for _, row := range markup.InlineKeyboard {
+		labels := make([]string, 0, len(row))
+		for _, button := range row {
+			switch button.Text {
+			case blankButtonText, "", " ":
+				labels = append(labels, "")
+			default:
+				labels = append(labels, button.Text)
+			}
+		}
+		rows = append(rows, labels)
+	}
+	return rows
 }
 
 type callbackAnswer struct {
@@ -116,14 +136,14 @@ func (f *fakeTelegram) UserBio(userID int64) string { return f.bios[userID] }
 func (f *fakeTelegram) SendPhotoWithKeyboardID(chatID int64, png []byte, caption string,
 	markup tgbotapi.InlineKeyboardMarkup) (int64, error) {
 	id := f.takeID()
-	f.photos = append(f.photos, sentMessage{ChatID: chatID, MessageID: id, Caption: caption, Buttons: len(markup.InlineKeyboard)})
+	f.photos = append(f.photos, sentMessage{ChatID: chatID, MessageID: id, Caption: caption, Buttons: len(markup.InlineKeyboard), Rows: buttonRows(markup)})
 	return id, nil
 }
 
 func (f *fakeTelegram) SendTextWithKeyboardID(chatID int64, text string,
 	markup tgbotapi.InlineKeyboardMarkup) (int64, error) {
 	id := f.takeID()
-	f.prompts = append(f.prompts, sentMessage{ChatID: chatID, MessageID: id, Text: text, Buttons: len(markup.InlineKeyboard)})
+	f.prompts = append(f.prompts, sentMessage{ChatID: chatID, MessageID: id, Text: text, Buttons: len(markup.InlineKeyboard), Rows: buttonRows(markup)})
 	return id, nil
 }
 
@@ -141,14 +161,14 @@ func (f *fakeTelegram) SendTemporaryText(chatID int64, text string, delay time.D
 func (f *fakeTelegram) EditText(chatID, messageID int64, text string,
 	markup tgbotapi.InlineKeyboardMarkup) error {
 	// 记下按钮行数：刷新进度时键盘必须跟着传回去，否则 Telegram 会把按钮删掉。
-	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Text: text, Buttons: len(markup.InlineKeyboard)})
+	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Text: text, Buttons: len(markup.InlineKeyboard), Rows: buttonRows(markup)})
 	return nil
 }
 
 // EditCaption 与 EditText 同源：图形态下刷新进度走这条（记录到同一个 edits 列表里）。
 func (f *fakeTelegram) EditCaption(chatID, messageID int64, caption string,
 	markup tgbotapi.InlineKeyboardMarkup) error {
-	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Caption: caption, Buttons: len(markup.InlineKeyboard)})
+	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Caption: caption, Buttons: len(markup.InlineKeyboard), Rows: buttonRows(markup)})
 	return nil
 }
 
@@ -368,8 +388,8 @@ func TestGroupVerificationPasses(t *testing.T) {
 		t.Fatalf("合并成一条后不该再有单独的提示文本，实际 %d 条", len(h.telegram.prompts))
 	}
 	prompt := h.telegram.photos[0]
-	if prompt.ChatID != 100 || prompt.Buttons != 2 {
-		t.Errorf("题面消息应发在目标群并带两行按钮（方向 + 管理员）：%+v", prompt)
+	if prompt.ChatID != 100 || prompt.Buttons != 4 {
+		t.Errorf("题面消息应发在目标群并带四行按钮（九宫格 + 管理员）：%+v", prompt)
 	}
 	if !strings.Contains(prompt.Caption, "进度") || !strings.Contains(prompt.Caption, "剩余机会") {
 		t.Errorf("说明里应有进度与剩余机会：%q", prompt.Caption)
@@ -504,8 +524,8 @@ func TestApprovalVerificationApproves(t *testing.T) {
 		t.Fatalf("合并成一条后不该再有单独的提示文本：%+v", h.telegram.prompts)
 	}
 	prompt := h.telegram.photos[0]
-	if prompt.ChatID != user.ID || prompt.Buttons != 1 {
-		t.Errorf("私聊验证只该有方向按钮，不该有管理员按钮：%+v", prompt)
+	if prompt.ChatID != user.ID || prompt.Buttons != 3 {
+		t.Errorf("私聊验证只该有九宫格三行，不该有管理员按钮：%+v", prompt)
 	}
 	if len(h.telegram.restricted) != 0 {
 		t.Error("申请模式不该对申请人做禁言（他还不在群里）")
@@ -868,6 +888,81 @@ func TestApprovalModeManualApproveCancelsVerification(t *testing.T) {
 	}
 }
 
+// TestKeyboardIsDPadGrid 校验方向键摆成九宫格：上居中、下居中、左右各占中间一行两侧，
+// 其余位置是没有功能的空位占位按钮。群内模式多一行管理员按钮，私聊模式没有。
+func TestKeyboardIsDPadGrid(t *testing.T) {
+	h := newHarness(t, Config{Mode: ModeDirect}, fakeRenderer{png: []byte("png")})
+	member := tgbotapi.User{ID: 70, FirstName: "新兵"}
+	if err := h.handler.OnNewMembers(newMemberUpdate(100, member, nil)); err != nil {
+		t.Fatal(err)
+	}
+	grid := h.telegram.photos[0].Rows
+	want := [][]string{
+		{"", Emoji(DirUp), ""},
+		{Emoji(DirLeft), "", Emoji(DirRight)},
+		{"", Emoji(DirDown), ""},
+		{"✅ 放行", "🚫 封禁"},
+	}
+	if len(grid) != len(want) {
+		t.Fatalf("键盘应是九宫格 + 管理员行，实际 %d 行：%v", len(grid), grid)
+	}
+	for i := range want {
+		if len(grid[i]) != len(want[i]) {
+			t.Fatalf("第 %d 行按钮数不对：%v", i, grid[i])
+		}
+		for j := range want[i] {
+			if grid[i][j] != want[i][j] {
+				t.Errorf("第 %d 行第 %d 列应是 %q，实际 %q（整行：%v）", i, j, want[i][j], grid[i][j], grid[i])
+			}
+		}
+	}
+
+	// 私聊模式：同样三行九宫格，但没有管理员行。
+	private := newHarness(t, Config{Mode: ModeApproval}, fakeRenderer{png: []byte("png")})
+	applicant := tgbotapi.User{ID: 71, FirstName: "申请人"}
+	if err := private.handler.OnJoinRequest(joinRequestUpdate(100, applicant, "")); err != nil {
+		t.Fatal(err)
+	}
+	privateGrid := private.telegram.photos[0].Rows
+	if len(privateGrid) != 3 {
+		t.Fatalf("私聊键盘应只有九宫格三行，实际 %d 行：%v", len(privateGrid), privateGrid)
+	}
+	if privateGrid[1][0] != Emoji(DirLeft) || privateGrid[1][1] != "" || privateGrid[1][2] != Emoji(DirRight) {
+		t.Errorf("左右键应在中间一行两侧、中间留空：%v", privateGrid)
+	}
+}
+
+// TestNoopCellDoesNothing 校验点九宫格的空位什么也不发生：进度不动、不算答错、不弹提示、不结算。
+func TestNoopCellDoesNothing(t *testing.T) {
+	h := newHarness(t, Config{Mode: ModeDirect, Attempts: 1}, fakeRenderer{png: []byte("png")})
+	member := tgbotapi.User{ID: 72, FirstName: "新兵"}
+	if err := h.handler.OnNewMembers(newMemberUpdate(100, member, nil)); err != nil {
+		t.Fatal(err)
+	}
+	session := h.session(t, 100, member.ID)
+	steps := session.Challenge.Target().Steps
+
+	h.click(t, 100, session.MessageID, member, noopAction)
+
+	if len(session.Challenge.Progress()) != 0 || session.Challenge.Remaining() != 1 {
+		t.Errorf("空位不该改变进度与机会：progress=%v remaining=%d", session.Challenge.Progress(), session.Challenge.Remaining())
+	}
+	if len(h.telegram.edits) != 0 {
+		t.Errorf("空位不该刷新任何东西：%+v", h.telegram.edits)
+	}
+	if len(h.telegram.banned) != 0 || len(h.telegram.unrestricted) != 0 {
+		t.Error("空位不该触发任何结算")
+	}
+	if len(h.telegram.answers) != 1 || h.telegram.answers[0].Text != "" || h.telegram.answers[0].Alert {
+		t.Errorf("空位只需静默应答一次（不弹窗）：%+v", h.telegram.answers)
+	}
+	// 空位点完还能正常继续答题。
+	h.click(t, 100, session.MessageID, member, steps[0])
+	if len(session.Challenge.Progress()) != 1 {
+		t.Errorf("空位之后应能正常答题：%v", session.Challenge.Progress())
+	}
+}
+
 // TestRefreshKeepsKeyboard 盯住那个踩过的坑：刷新进度走的是 editMessageText，
 // 而 Telegram 只要请求里不带 reply_markup 就会把已有键盘删掉 —— 表现是新成员点一下，
 // 整排方向按钮消失，验证再也点不下去。所以每次刷新都必须把键盘原样带回去。
@@ -879,23 +974,23 @@ func TestRefreshKeepsKeyboard(t *testing.T) {
 	}
 	session := h.session(t, 100, member.ID)
 
-	// 点对一步：刷新一次进度，键盘必须还在（群内模式两行：方向 + 管理员）。
+	// 点对一步：刷新一次进度，键盘必须还在（群内模式四行：九宫格三行 + 管理员一行）。
 	h.click(t, 100, session.MessageID, member, session.Challenge.Target().Steps[0])
 	if len(h.telegram.edits) != 1 {
 		t.Fatalf("点对一步应刷新一次进度，实际 %d 次", len(h.telegram.edits))
 	}
-	if got := h.telegram.edits[0].Buttons; got != 2 {
-		t.Errorf("刷新后键盘行数应为 2（方向 + 管理员），实际 %d —— 键盘被 Telegram 删掉了", got)
+	if got := h.telegram.edits[0].Buttons; got != 4 {
+		t.Errorf("刷新后键盘行数应为 4（九宫格三行 + 管理员一行），实际 %d —— 键盘被 Telegram 删掉了", got)
 	}
 
 	// 点错也刷新，同样不能丢键盘。
 	h.click(t, 100, session.MessageID, member, wrongDir(session.Challenge.Target().Steps[1]))
 	last := h.telegram.edits[len(h.telegram.edits)-1]
-	if last.Buttons != 2 {
-		t.Errorf("答错刷新后键盘行数应为 2，实际 %d", last.Buttons)
+	if last.Buttons != 4 {
+		t.Errorf("答错刷新后键盘行数应为 4，实际 %d", last.Buttons)
 	}
 
-	// 申请模式（私聊）只有一行方向按钮。
+	// 申请模式（私聊）只有九宫格三行，没有管理员行。
 	private := newHarness(t, Config{Mode: ModeApproval, Attempts: 3}, fakeRenderer{png: []byte("png")})
 	applicant := tgbotapi.User{ID: 41, FirstName: "申请人"}
 	if err := private.handler.OnJoinRequest(joinRequestUpdate(100, applicant, "")); err != nil {
@@ -906,8 +1001,8 @@ func TestRefreshKeepsKeyboard(t *testing.T) {
 	if len(private.telegram.edits) != 1 {
 		t.Fatalf("私聊验证点对一步也应刷新，实际 %d 次", len(private.telegram.edits))
 	}
-	if got := private.telegram.edits[0].Buttons; got != 1 {
-		t.Errorf("私聊验证的键盘应只有 1 行，实际 %d", got)
+	if got := private.telegram.edits[0].Buttons; got != 3 {
+		t.Errorf("私聊验证的键盘应只有九宫格 3 行，实际 %d", got)
 	}
 }
 
@@ -1046,8 +1141,8 @@ func TestImageOrRenderFailureStillPrompts(t *testing.T) {
 			if len(h.telegram.prompts) != 1 {
 				t.Fatalf("纯文本验证消息照发，实际 %d 条", len(h.telegram.prompts))
 			}
-			if h.telegram.prompts[0].Buttons != 2 {
-				t.Errorf("退成纯文本时按钮照旧两行：%+v", h.telegram.prompts[0])
+			if h.telegram.prompts[0].Buttons != 4 {
+				t.Errorf("退成纯文本时按钮照旧四行（九宫格 + 管理员）：%+v", h.telegram.prompts[0])
 			}
 			text := h.telegram.prompts[0].Text
 			if !strings.Contains(text, "呼叫演练") || !strings.Contains(text, "进度") {

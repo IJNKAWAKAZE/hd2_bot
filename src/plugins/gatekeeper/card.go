@@ -111,14 +111,23 @@ func (h *Handler) timeoutText() string {
 	return fmt.Sprintf("%d 秒", int(h.cfg.Timeout.Seconds()))
 }
 
-// keyboard 组按钮：一行四个方向；群内模式再加一行给管理员用的放行/封禁。
+// blankButtonText 是九宫格空位的按钮文案：零宽空格 —— 客户端上看起来就是空的。
+// 行内键盘的每一行必须由按钮填满，没法真正留「空档」，所以空位只能放这种占位按钮。
+const blankButtonText = "\u200b"
+
+// noopAction 是空位按钮的动作：点了什么也不做（只应答，结束按钮的加载状态）。
+const noopAction = "noop"
+
+// keyboard 组按钮：方向键按九宫格摆（上居中、下居中、左右各占中间一行），
+// 其余空位放占位按钮 —— 手指位置与屏幕一致，比原来一排四个好按。
+//
+// 群内模式再加一行给管理员用的放行/封禁；私聊模式没有这一行（管理员不在那个会话里）。
 func (h *Handler) keyboard(session *Session) tgbotapi.InlineKeyboardMarkup {
-	rows := [][]tgbotapi.InlineKeyboardButton{tgbotapi.NewInlineKeyboardRow(
-		dirButton(session, DirUp),
-		dirButton(session, DirDown),
-		dirButton(session, DirLeft),
-		dirButton(session, DirRight),
-	)}
+	rows := [][]tgbotapi.InlineKeyboardButton{
+		tgbotapi.NewInlineKeyboardRow(noopButton(session), dirButton(session, DirUp), noopButton(session)),
+		tgbotapi.NewInlineKeyboardRow(dirButton(session, DirLeft), noopButton(session), dirButton(session, DirRight)),
+		tgbotapi.NewInlineKeyboardRow(noopButton(session), dirButton(session, DirDown), noopButton(session)),
+	}
 	if !session.Private {
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			adminButton(session, "pass", "✅ 放行"),
@@ -130,6 +139,11 @@ func (h *Handler) keyboard(session *Session) tgbotapi.InlineKeyboardMarkup {
 
 func dirButton(session *Session, dir string) tgbotapi.InlineKeyboardButton {
 	return tgbotapi.NewInlineKeyboardButtonData(Emoji(dir), callbackData(session, dir))
+}
+
+// noopButton 是九宫格里的空位：文案是零宽空格，点了不改任何状态。
+func noopButton(session *Session) tgbotapi.InlineKeyboardButton {
+	return tgbotapi.NewInlineKeyboardButtonData(blankButtonText, callbackData(session, noopAction))
 }
 
 func adminButton(session *Session, action, text string) tgbotapi.InlineKeyboardButton {
