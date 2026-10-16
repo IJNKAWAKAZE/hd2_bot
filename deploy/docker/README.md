@@ -42,6 +42,10 @@ docker compose stop hd2
 更新二进制后执行 `docker compose up -d --build`；仅修改配置后执行 `docker compose restart hd2`。
 如需回退，先 `docker compose down`，再恢复旧二进制并按原方式启动。
 
+镜像里的层顺序是「先装驱动与 Chromium、最后拷主程序」，所以**只换 `hd2_bot` 时不会重新下载 Chromium**，
+构建通常几十秒就能完成；只有 `playwright` 二进制变了（即 `go.mod` 里的版本升级）才会重装浏览器。
+注意必须是 `up -d --build`（或 `build` 后 `up -d`）：主程序是打进镜像的，只 `restart` 用的还是旧二进制。
+
 ## 构建说明
 
 在源码根目录生成 Linux 二进制后，将它们与本目录文件放在同一目录：
