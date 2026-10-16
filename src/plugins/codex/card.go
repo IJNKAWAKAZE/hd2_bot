@@ -116,17 +116,21 @@ type WarbondRow struct {
 	Medals  string
 	Credits string
 	Items   string
+	// Upcoming 为 true 时卡片上标「未上线」：数据层照收（新债券公布后群里就会问），
+	// 但得让人一眼看出还没上线。
+	Upcoming bool
 }
 
 // WarbondDetail 是一本债券的明细。
 type WarbondDetail struct {
-	Name    string
-	English string
-	Pages   string
-	Medals  string
-	Credits string
-	Items   []WarbondItem
-	More    string
+	Name     string
+	English  string
+	Pages    string
+	Medals   string
+	Credits  string
+	Upcoming bool
+	Items    []WarbondItem
+	More     string
 }
 
 // WarbondItem 是明细里的一件装备。
@@ -521,12 +525,13 @@ func BuildWarbondsCard(books []arsenal.Warbond, detail *WarbondDetail, keyword s
 	card.Books = make([]WarbondRow, 0, len(books))
 	for _, book := range books {
 		card.Books = append(card.Books, WarbondRow{
-			Name:    plugutil.DefaultText(book.NameZh, book.NameEn),
-			English: strings.TrimSpace(book.NameEn),
-			Pages:   fmt.Sprintf("%d 页", book.Pages),
-			Medals:  fmt.Sprintf("%s 勋章", plugutil.FormatInt(int64(book.MedalsTotal))),
-			Credits: creditsText(book.SuperCredits),
-			Items:   fmt.Sprintf("%d 件", book.ItemCount),
+			Name:     plugutil.DefaultText(book.NameZh, book.NameEn),
+			English:  strings.TrimSpace(book.NameEn),
+			Pages:    fmt.Sprintf("%d 页", book.Pages),
+			Medals:   fmt.Sprintf("%s 勋章", plugutil.FormatInt(int64(book.MedalsTotal))),
+			Credits:  creditsText(book.SuperCredits),
+			Items:    fmt.Sprintf("%d 件", book.ItemCount),
+			Upcoming: book.Upcoming,
 		})
 	}
 	if len(card.Books) == 0 {
@@ -546,12 +551,13 @@ func creditsText(credits int) string {
 // BuildWarbondDetail 把一本债券转成明细；items 超出 maxWarbondItems 时截断并给出说明。
 func BuildWarbondDetail(book arsenal.Warbond, items []arsenal.Item, catalog *arsenal.Catalog) *WarbondDetail {
 	detail := &WarbondDetail{
-		Name:    plugutil.DefaultText(book.NameZh, book.NameEn),
-		English: strings.TrimSpace(book.NameEn),
-		Pages:   fmt.Sprintf("%d 页", book.Pages),
-		Medals:  fmt.Sprintf("%s 勋章", plugutil.FormatInt(int64(book.MedalsTotal))),
-		Credits: creditsText(book.SuperCredits),
-		Items:   make([]WarbondItem, 0, min(len(items), maxWarbondItems)),
+		Name:     plugutil.DefaultText(book.NameZh, book.NameEn),
+		English:  strings.TrimSpace(book.NameEn),
+		Pages:    fmt.Sprintf("%d 页", book.Pages),
+		Medals:   fmt.Sprintf("%s 勋章", plugutil.FormatInt(int64(book.MedalsTotal))),
+		Credits:  creditsText(book.SuperCredits),
+		Upcoming: book.Upcoming,
+		Items:    make([]WarbondItem, 0, min(len(items), maxWarbondItems)),
 	}
 	if detail.Name == detail.English {
 		detail.English = ""

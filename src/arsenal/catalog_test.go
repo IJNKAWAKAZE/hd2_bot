@@ -308,6 +308,7 @@ func TestKindAndAcqLabelsFallBack(t *testing.T) {
 	for kind, want := range map[string]string{
 		"warbond": "债券", "requisition": "征用点", "superstore": "超级商店",
 		"event": "活动奖励", "default": "默认解锁", "unavailable": "已下架",
+		"upcoming": "未上线",
 	} {
 		if got := AcqLabel(kind); got != want {
 			t.Errorf("AcqLabel(%q) = %q，期望 %q", kind, got, want)

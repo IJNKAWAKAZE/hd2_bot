@@ -11,6 +11,7 @@ import (
 
 	"hd2_bot/src/arsenal"
 	"hd2_bot/src/bestiary"
+	"hd2_bot/src/render"
 )
 
 func TestEnemyEmblemMatchesFaction(t *testing.T) {
@@ -265,6 +266,48 @@ func TestBuildWarbondsCardList(t *testing.T) {
 	}
 	if card.Books[1].Credits != "1,000" || card.Books[1].Items != "1 件" {
 		t.Errorf("第二本的价格/件数错误：%+v", card.Books[1])
+	}
+}
+
+// TestWarbondsCardMarksUpcoming 校验未上线的债券在名单与明细上都标出「未上线」：
+// 数据层会把这些债券收进来（不然群里问「新债券有什么」查不到），但卡片必须一眼看出还没上线。
+func TestWarbondsCardMarksUpcoming(t *testing.T) {
+	book := arsenal.Warbond{
+		ID: "scope-of-authority", NameZh: "管辖范围", NameEn: "Scope of Authority",
+		Pages: 3, MedalsTotal: 0, SuperCredits: 1000, Upcoming: true,
+	}
+	card := BuildWarbondsCard([]arsenal.Warbond{book}, nil, "", time.Time{})
+	if len(card.Books) != 1 || !card.Books[0].Upcoming {
+		t.Fatalf("名单里的未上线标记没传下去：%+v", card.Books)
+	}
+	html, err := render.HTML(render.Card{Name: "warbonds", Data: card})
+	if err != nil {
+		t.Fatalf("渲染债券名单失败：%v", err)
+	}
+	if !strings.Contains(html, "未上线") {
+		t.Error("名单卡片上应出现「未上线」标记")
+	}
+
+	detail := BuildWarbondDetail(book, nil, nil)
+	if detail == nil || !detail.Upcoming {
+		t.Fatalf("明细里的未上线标记没传下去：%+v", detail)
+	}
+	html, err = render.HTML(render.Card{Name: "warbonds", Data: BuildWarbondsCard(nil, detail, "管辖范围", time.Time{})})
+	if err != nil {
+		t.Fatalf("渲染债券明细失败：%v", err)
+	}
+	if !strings.Contains(html, "未上线") {
+		t.Error("明细卡片上应出现「未上线」标记")
+	}
+
+	// 已上线的债券不该有标记。
+	live := BuildWarbondsCard([]arsenal.Warbond{{ID: "x", NameZh: "已上线", NameEn: "Live"}}, nil, "", time.Time{})
+	html, err = render.HTML(render.Card{Name: "warbonds", Data: live})
+	if err != nil {
+		t.Fatalf("渲染债券名单失败：%v", err)
+	}
+	if strings.Contains(html, "未上线") {
+		t.Error("已上线的债券不该标「未上线」")
 	}
 }
 

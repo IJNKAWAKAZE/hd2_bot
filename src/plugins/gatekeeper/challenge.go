@@ -153,7 +153,8 @@ func PickTarget(ctx context.Context, provider CatalogProvider, rnd *rand.Rand, a
 	candidates := make([]Target, 0, 32)
 	fallback := make([]Target, 0, 32)
 	for _, item := range catalog.Items() {
-		if item.Deploy == nil || item.Acq.Kind == "unavailable" {
+		// 已下架的拿不到、未上线的还没上线：都不能拿来考新成员（人家在游戏里点不出来）。
+		if item.Deploy == nil || item.Acq.Kind == "unavailable" || item.Acq.Kind == "upcoming" {
 			continue
 		}
 		switch item.Kind {

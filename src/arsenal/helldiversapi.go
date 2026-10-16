@@ -31,6 +31,9 @@ const (
 
 	// defaultAPIBase 是默认源地址（无 key、静态文件不限量，见上游 README）。
 	defaultAPIBase = "https://helldivers-api.dionatha.com.br"
+	// legacyImagePrefix 是老源（HD2Tool）快照里的图片路径前缀：那是 HD2Tool 仓库内的相对路径
+	// （assets/wiki/xxx.png），与安装源无关，取图要回 GitHub —— 见 apiSource.ImageURLs。
+	legacyImagePrefix = "assets/"
 	// defaultZhWikiBase 是中文名术语表的地址（社区中文维基，GitHub Pages）。
 	defaultZhWikiBase = "https://jerry114514.github.io/HD2_Wiki/data/wiki/zh"
 	// apiMaxBytes 是单个集合的下载上限。实测最大的是 stratagems.json（~850KB），给 16MB 足够富余。
@@ -70,7 +73,14 @@ func (s *apiSource) Name() string { return sourceKindHelldiversAPI }
 func (s *apiSource) AliasesJSON(context.Context) []byte { return nil }
 
 // ImageURLs 把目录里的图片地址展开成候选地址。
-// 新源给的是绝对地址（API 的 CDN），没有镜像可换，所以只有一个候选。
+//
+// 三种情况：
+//   - 绝对地址（新源自己的 CDN）：原样用，只有一个候选；
+//   - 站内相对地址（/images/v1/...）：拼上游站点；
+//   - 仓库内相对地址（assets/wiki/...）：这是**老源（HD2Tool）快照**里的写法。
+//     刚换源时磁盘快照还是老格式，把它拼到新站点上只会 404 ——
+//     线上表现就是日志里一连串「下载装备图失败：HTTP 404」、群里卡片全没图。
+//     所以这种路径交给老源的取图规则（GitHub 原始地址 + 镜像），等目录刷新成新格式后自然消失。
 func (s *apiSource) ImageURLs(imagePath string) []string {
 	trimmed := strings.TrimSpace(imagePath)
 	if trimmed == "" {
@@ -78,6 +88,9 @@ func (s *apiSource) ImageURLs(imagePath string) []string {
 	}
 	if strings.HasPrefix(trimmed, "http://") || strings.HasPrefix(trimmed, "https://") {
 		return []string{trimmed}
+	}
+	if strings.HasPrefix(trimmed, legacyImagePrefix) {
+		return s.store.rawURLs("public/" + trimmed)
 	}
 	return []string{s.base + "/" + strings.TrimPrefix(trimmed, "/")}
 }
@@ -97,9 +110,9 @@ func (s *apiSource) CatalogJSON(ctx context.Context) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("序列化目录失败：%w", err)
 	}
-	// 把「跳过了什么」写进日志：群里问「怎么查不到某件装备」时，这一行就能回答
-	// （未上线 / 任务类战备 / civilian 类都不进目录）。
-	s.store.log("[arsenal] 目录已生成：%d 件装备 / %d 本债券（数据版本 %s，源 %s；已跳过：未上线 %d 件、任务类战备 %d 件、civilian 类 %d 件）",
+	// 把「跳过了什么」写进日志：群里问「怎么查不到某件装备」时，这一行就能回答。
+	// 未上线的装备与债券会收进目录但标成「未上线」（不算跳过），所以只有后两类是「已跳过」。
+	s.store.log("[arsenal] 目录已生成：%d 件装备 / %d 本债券（数据版本 %s，源 %s；未上线 %d 件已收录并标注、已跳过：任务类战备 %d 件、civilian 类 %d 件）",
 		len(catalog.Items), len(catalog.Warbonds), catalog.Meta.DataVersion, s.base,
 		stats.upcoming, stats.missionish, stats.civilian)
 	return raw, nil
@@ -143,10 +156,13 @@ func (s *apiSource) load(ctx context.Context) (*apiDataset, error) {
 		wg.Add(1)
 		go func(path string, into any) {
 			defer wg.Done()
-			if err := s.getJSON(ctx, s.base+"/v1/"+path, apiMaxBytes, into); err != nil {
+			url := s.base + "/v1/" + path
+			if err := s.getJSON(ctx, url, apiMaxBytes, into); err != nil {
 				mu.Lock()
 				if firstErr == nil {
-					firstErr = fmt.Errorf("下载 %s 失败：%w", path, err)
+					// 报错带上**完整地址**：api_base 写错（多一段路径、域名写错）时，
+					// 只看「下载 warbonds.json 失败」根本查不出请求打到了哪儿去。
+					firstErr = fmt.Errorf("下载 %s 失败：%w", url, err)
 				}
 				mu.Unlock()
 				cancel()
@@ -403,7 +419,10 @@ type outWarbond struct {
 	NameEn       string    `json:"nameEn"`
 	SuperCredits int       `json:"superCredits"`
 	Pages        []outPage `json:"pages"`
-	Wiki         outWiki   `json:"wiki"`
+	// Upcoming 表示这本债券还没上线（上游 upcoming: true）：卡片上标「未上线」，
+	// 内容照收，因为群里问的往往就是「新债券出了没、有什么」。
+	Upcoming bool    `json:"upcoming,omitempty"`
+	Wiki     outWiki `json:"wiki"`
 }
 
 type outImage struct {
@@ -507,11 +526,11 @@ func buildCatalogJSON(dataset *apiDataset, zh *zhResolver, base string) (*outCat
 	}
 
 	// 债券：按上线日期排序（没写日期的排最后），并记下顺序供装备排序用。
+	// 还没上线的也收，只是在卡片上标「未上线」：群里问的往往就是「新债券出了没、有什么」。
 	warbonds := make([]apiWarbond, 0, len(dataset.warbonds.Data))
 	for _, warbond := range dataset.warbonds.Data {
 		if warbond.Upcoming {
 			stats.upcoming++
-			continue
 		}
 		warbonds = append(warbonds, warbond)
 	}
@@ -553,6 +572,7 @@ func buildCatalogJSON(dataset *apiDataset, zh *zhResolver, base string) (*outCat
 			NameEn:       nameEn,
 			SuperCredits: superCreditsOf(warbond.Cost),
 			Pages:        pages,
+			Upcoming:     warbond.Upcoming,
 			Wiki:         outWiki{URL: warbond.Wiki.URL},
 		}
 		catalog.Warbonds = append(catalog.Warbonds, out)
@@ -574,35 +594,27 @@ func buildCatalogJSON(dataset *apiDataset, zh *zhResolver, base string) (*outCat
 	}
 
 	for _, weapon := range dataset.weapons.Data {
-		if weapon.Upcoming {
-			stats.upcoming++
-			continue
-		}
 		item, ok := weaponItemOf(weapon, zh, base)
 		if !ok {
 			stats.civilian++
 			continue
 		}
+		markUpcoming(&item, weapon.Upcoming, stats)
 		appendItem(item)
 	}
 	for _, stratagem := range dataset.stratagems.Data {
-		if stratagem.Upcoming {
-			stats.upcoming++
-			continue
-		}
 		item, ok := stratagemItemOf(stratagem, zh, base)
 		if !ok {
 			stats.missionish++
 			continue
 		}
+		markUpcoming(&item, stratagem.Upcoming, stats)
 		appendItem(item)
 	}
 	for _, armor := range dataset.armors.Data {
-		if armor.Upcoming {
-			stats.upcoming++
-			continue
-		}
-		appendItem(armorItemOf(armor, zh, passiveNames, base))
+		item := armorItemOf(armor, zh, passiveNames, base)
+		markUpcoming(&item, armor.Upcoming, stats)
+		appendItem(item)
 	}
 
 	if len(records) == 0 {
@@ -614,6 +626,19 @@ func buildCatalogJSON(dataset *apiDataset, zh *zhResolver, base string) (*outCat
 		catalog.Items = append(catalog.Items, record.item)
 	}
 	return catalog, stats, nil
+}
+
+// markUpcoming 把还没上线的装备标成「未上线」（获取方式 kind=upcoming）。
+//
+// 为什么收而不是丢：群里问的往往就是「新装备/新债券出了没」，丢掉等于「查不到」。
+// 但获取方式不再是 warbond/requisition，所以入群验证的题库会自然跳过它 ——
+// 不能让新成员去点一件游戏里还点不出来的东西。
+func markUpcoming(item *outItem, upcoming bool, stats *conversionStats) {
+	if !upcoming {
+		return
+	}
+	stats.upcoming++
+	item.Acquisition.Kind = "upcoming"
 }
 
 // superCreditsOf 取超级货币价（老目录的 superCredits 字段）。

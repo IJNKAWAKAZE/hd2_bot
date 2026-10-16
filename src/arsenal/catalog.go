@@ -65,6 +65,7 @@ var acqLabels = map[string]string{
 	"edition":     "版本奖励",
 	"poi":         "兴趣点",
 	"unavailable": "已下架",
+	"upcoming":    "未上线",
 }
 
 // AcqLabel 返回获取方式中文名；未收录的取值原样返回（不猜，也不吞）。
@@ -157,8 +158,11 @@ type Warbond struct {
 	Pages        int // 页数
 	MedalsTotal  int // 全部解锁所需勋章（上游给的是每页累计值，取最大的那一页）
 	SuperCredits int // 超级货币价；0 表示不单卖（例如首发那本）
-	WikiURL      string
-	ItemCount    int // 这本债券包含多少件装备（由目录反查，上游不直接给）
+	// Upcoming 为 true 表示这本债券还没上线：卡片上标「未上线」，内容照常展示
+	//（群里问「新债券出了没、有什么」时要有东西可看）。
+	Upcoming  bool
+	WikiURL   string
+	ItemCount int // 这本债券包含多少件装备（由目录反查，上游不直接给）
 }
 
 // Catalog 是一份解析好的装备目录。解析完成后只读，可并发使用。
@@ -261,7 +265,9 @@ type rawWarbond struct {
 	NameZh       string  `json:"nameZh"`
 	NameEn       string  `json:"nameEn"`
 	SuperCredits jsonInt `json:"superCredits"`
-	Pages        []struct {
+	// Upcoming 为 true 表示这本债券还没上线（上游 upcoming: true），卡片上标「未上线」。
+	Upcoming bool `json:"upcoming"`
+	Pages    []struct {
 		Page             jsonInt `json:"page"`
 		CumulativeMedals jsonInt `json:"cumulativeMedals"`
 	} `json:"pages"`
@@ -375,6 +381,7 @@ func ParseCatalog(raw []byte, aliases map[string][]string) (*Catalog, error) {
 			NameEn:       strings.TrimSpace(w.NameEn),
 			Pages:        len(w.Pages),
 			SuperCredits: int(w.SuperCredits),
+			Upcoming:     w.Upcoming,
 			WikiURL:      w.Wiki.URL,
 		}
 		for _, page := range w.Pages {

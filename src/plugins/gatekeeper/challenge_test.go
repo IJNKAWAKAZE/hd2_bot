@@ -36,7 +36,11 @@ const fixtureCatalog = `{
      "acquisition": {"kind": "requisition"},
      "deployment": {"type": "Sentry", "code": ["down", "up", "right", "up", "left", "up"], "cooldownSeconds": 150}},
     {"id": "a-35-recon", "productKind": "body-armor", "nameZh": "A-35“侦察者”", "nameEn": "A-35 Recon",
-     "acquisition": {"kind": "superstore"}, "armor": {"class": "Medium", "rating": 100}}
+     "acquisition": {"kind": "superstore"}, "armor": {"class": "Medium", "rating": 100}},
+    {"id": "las-44-nova", "productKind": "other-stratagem", "nameZh": "LAS-44 新星",
+     "nameEn": "LAS-44 Nova",
+     "acquisition": {"kind": "upcoming"},
+     "deployment": {"type": "Support Weapon", "code": ["up", "down", "left"], "cooldownSeconds": 300}}
   ]
 }`
 
@@ -158,9 +162,9 @@ func TestPickTargetFiltersCatalog(t *testing.T) {
 			t.Fatalf("指令长度不该超出范围：%v", target.Steps)
 		}
 	}
-	for _, banned := range []string{"orbital-illumination-flare", "mg-43-machine-gun", "a-35-recon"} {
+	for _, banned := range []string{"orbital-illumination-flare", "mg-43-machine-gun", "a-35-recon", "las-44-nova"} {
 		if seen[banned] {
-			t.Errorf("%s 不该被选为题目（已下架 / 指令过短 / 没有召唤指令）", banned)
+			t.Errorf("%s 不该被选为题目（已下架 / 指令过短 / 没有召唤指令 / 还没上线）", banned)
 		}
 	}
 	if !seen["orbital-precision-strike"] || !seen["a-ac-8-autocannon-sentry"] {

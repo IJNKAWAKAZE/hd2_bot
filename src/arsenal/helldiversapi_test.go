@@ -358,18 +358,35 @@ func TestAPISourceBuildsParsableCatalog(t *testing.T) {
 	}
 }
 
-// TestAPISourceDropsOutOfScopeEntries 校验不在目录范围内的条目被丢掉：
-// 未上线（upcoming）的装备与债券、任务流程战备、civilian 武器。
-func TestAPISourceDropsOutOfScopeEntries(t *testing.T) {
+// TestAPISourceKeepsUpcomingWithLabel 校验未上线（upcoming）的装备与债券照收，但标成「未上线」：
+// 群里问的往往就是还没上线、但已经公布的那本债券与几件装备，直接丢掉等于「查不到」。
+// 真正不该进目录的是任务流程战备与 civilian 武器。
+func TestAPISourceKeepsUpcomingWithLabel(t *testing.T) {
 	catalog := mustCatalogFromAPI(t, newFakeAPI(t))
 
-	for _, id := range []string{"sg-97-sweeper", "reinforce", "break-action-shotgun-civilian"} {
+	sweeper, ok := catalog.Item("sg-97-sweeper")
+	if !ok {
+		t.Fatal("未上线的装备应保留在目录里")
+	}
+	if sweeper.Acq.Kind != "upcoming" {
+		t.Errorf("未上线的装备应标成 upcoming，实际 %+v", sweeper.Acq)
+	}
+	if got := AcqLabel(sweeper.Acq.Kind); got != "未上线" {
+		t.Errorf("获取方式应显示「未上线」，实际 %q", got)
+	}
+
+	scope, ok := catalog.Warbond("scope-of-authority")
+	if !ok {
+		t.Fatal("未上线的债券应保留在名单里")
+	}
+	if !scope.Upcoming {
+		t.Error("未上线的债券要带上 Upcoming 标记，卡片据此显示「未上线」")
+	}
+
+	for _, id := range []string{"reinforce", "break-action-shotgun-civilian"} {
 		if _, ok := catalog.Item(id); ok {
 			t.Errorf("%s 不该进目录", id)
 		}
-	}
-	if _, ok := catalog.Warbond("scope-of-authority"); ok {
-		t.Error("未上线的债券不该进名单")
 	}
 	// 已下线的战备要保留（老目录里也有，卡片上标「已下架」）。
 	frv, ok := catalog.Item("m-104-incinerator-frv")
@@ -378,16 +395,16 @@ func TestAPISourceDropsOutOfScopeEntries(t *testing.T) {
 	}
 }
 
-// TestAPISourceWarbondFieldsAndOrder 校验债券字段与排序：按上线日期，老本在前。
+// TestAPISourceWarbondFieldsAndOrder 校验债券字段与排序：按上线日期，老本在前，未上线的排最后。
 func TestAPISourceWarbondFieldsAndOrder(t *testing.T) {
 	catalog := mustCatalogFromAPI(t, newFakeAPI(t))
 
 	books := catalog.Warbonds()
-	if len(books) != 2 {
-		t.Fatalf("应有 2 本债券，实际 %d", len(books))
+	if len(books) != 3 {
+		t.Fatalf("应有 3 本债券（含未上线那本），实际 %d", len(books))
 	}
-	if books[0].ID != "helldivers-mobilize" || books[1].ID != "ironclad-democracy" {
-		t.Errorf("债券应按上线日期排序，实际 %s → %s", books[0].ID, books[1].ID)
+	if books[0].ID != "helldivers-mobilize" || books[1].ID != "ironclad-democracy" || books[2].ID != "scope-of-authority" {
+		t.Errorf("债券应按上线日期排序，实际 %s → %s → %s", books[0].ID, books[1].ID, books[2].ID)
 	}
 	ironclad := books[1]
 	if ironclad.NameZh != "民主铁壁" || ironclad.Pages != 3 || ironclad.MedalsTotal != 360 || ironclad.SuperCredits != 1000 {
@@ -395,6 +412,9 @@ func TestAPISourceWarbondFieldsAndOrder(t *testing.T) {
 	}
 	if ironclad.ItemCount != 3 {
 		t.Errorf("债券件数应反查得到 3 件（两件武器 + 一件护甲）：%d", ironclad.ItemCount)
+	}
+	if ironclad.Upcoming {
+		t.Error("已上线的债券不该带未上线标记")
 	}
 }
 
@@ -471,6 +491,25 @@ func TestAPISourceFailsWhenCollectionFails(t *testing.T) {
 		t.Fatal("集合缺失时应报错")
 	} else if !strings.Contains(err.Error(), "warbonds.json") {
 		t.Errorf("错误应说明是哪个集合失败：%v", err)
+	} else if !strings.Contains(err.Error(), "http") {
+		// 报错要带上完整地址：配置里 api_base 写错（多一段路径、少个域名）时，
+		// 只看「下载 warbonds.json 失败」查不出打到了哪儿去。
+		t.Errorf("错误应带上实际请求的地址：%v", err)
+	}
+}
+
+// TestAPISourceNormalizesBase 校验 api_base 末尾多写斜杠也能用：
+// 配置里手写地址时最容易多带一个 /，不该因此多一条斜杠就报错。
+func TestAPISourceNormalizesBase(t *testing.T) {
+	store := New(Config{
+		Dir:     t.TempDir(),
+		Source:  sourceKindHelldiversAPI,
+		APIBase: "https://api.test/",
+	}, Deps{})
+	source := store.src
+
+	if got := source.ImageURLs("/images/v1/weapons/a.webp"); len(got) != 1 || got[0] != "https://api.test/images/v1/weapons/a.webp" {
+		t.Errorf("末尾斜杠应被裁掉，实际：%+v", got)
 	}
 }
 
@@ -519,6 +558,31 @@ func TestAPISourceImageURLs(t *testing.T) {
 	}
 	if got := source.ImageURLs("  "); got != nil {
 		t.Errorf("空地址不该给出候选：%+v", got)
+	}
+}
+
+// TestAPISourceImageURLsKeepLegacyPaths 校验「换到新源、磁盘快照还是老源的」这段混搭期取图仍走老路。
+//
+// 老快照里图片路径是仓库内相对路径（assets/wiki/xxx.png），把它拼到新源站点上只会 404 ——
+// 线上表现就是日志里一条条 `下载装备图失败：HTTP 404`、群里卡片全没图。
+func TestAPISourceImageURLsKeepLegacyPaths(t *testing.T) {
+	store := New(Config{Dir: t.TempDir(), Source: sourceKindHelldiversAPI, APIBase: "https://api.test/"}, Deps{})
+	source := store.src
+
+	got := source.ImageURLs("assets/wiki/ar-2-coyote.png")
+	if len(got) == 0 {
+		t.Fatal("老快照的图片路径也要给出候选地址")
+	}
+	for _, url := range got {
+		if strings.Contains(url, "api.test") {
+			t.Errorf("老路径不该拼到新源站点上（那是 404 的来源）：%+v", got)
+		}
+	}
+	if !strings.Contains(got[0], "ar-2-coyote.png") {
+		t.Errorf("候选地址里应包含原文件名：%+v", got)
+	}
+	if len(got) < 2 {
+		t.Errorf("老路径应同时给主地址与镜像地址：%+v", got)
 	}
 }
 
