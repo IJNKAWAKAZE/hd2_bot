@@ -20,10 +20,12 @@ type Session struct {
 	// Telegram 只保证机器人能用它联系申请人 —— 申请人多半从没主动给机器人发过消息，
 	// 直接按用户 id 发私聊会被拒掉；直接加入模式用不到，恒为 0。
 	PMChatID int64
-	// PhotoID 是题面图那条消息的 id；图没发出去时为 0（验证照常进行）。
-	PhotoID int64
-	// MessageID 是提示消息（带按钮、显示进度）的 id。
+	// MessageID 是这次验证那条消息的 id：题面图、提示文本与按钮全在这一条上。
 	MessageID int64
+	// HasPhoto 说明那条消息是「图 + 说明」形态（true）还是纯文本形态（false）。
+	// 题面图出不来时（没配渲染器、图标下载失败、渲染失败、发图失败）退成纯文本，答案这时补在
+	// 文本里；刷新进度也因此分成编辑说明（caption）与编辑文本两条路径。
+	HasPhoto bool
 	// JoinID 是群里那条「XX 加入了群组」的系统消息，收尾时删掉它。
 	JoinID int64
 

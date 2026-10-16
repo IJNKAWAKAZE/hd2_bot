@@ -85,7 +85,7 @@ func (h *Handler) promptText(session *Session) string {
 	b.WriteString(fmt.Sprintf("新兵 %s，呼叫演练开始。\n", bot.Escape(session.Name)))
 	b.WriteString(fmt.Sprintf("请在 %s内按顺序点出「%s」的召唤指令。\n\n",
 		bot.Escape(h.timeoutText()), bot.Escape(target.NameZh)))
-	if h.cfg.ShowAnswer && session.PhotoID == 0 {
+	if h.cfg.ShowAnswer && !session.HasPhoto {
 		b.WriteString(fmt.Sprintf("召唤指令：%s\n\n", bot.Escape(dirGlyphs(target.Steps))))
 	}
 	b.WriteString(fmt.Sprintf("进度：%s（%d/%d）\n",

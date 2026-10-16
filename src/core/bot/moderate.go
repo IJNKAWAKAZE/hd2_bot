@@ -148,19 +148,21 @@ func (b *Bot) SendText(chatID int64, text string) error {
 	return nil
 }
 
-// SendPhotoID 发一张图片并返回消息 id（不带 caption 与键盘）。
-// 与 SendPhoto 的差别只有返回值：入群验证把「题面图」和「提示文本」分成两条消息发，
-// 收尾时图也要一起删掉，所以需要拿到它的 id。图片不会自动删除。
-func (b *Bot) SendPhotoID(chatID int64, png []byte, replyTo int64) (int64, error) {
+// SendPhotoWithKeyboardID 发一张带说明与内联键盘的图片，返回消息 id。
+// 入群验证用它把「题面图 + 提示文本 + 按钮」发成一条消息（说明就是提示文本，进度也编辑在这条上）。
+func (b *Bot) SendPhotoWithKeyboardID(chatID int64, png []byte, caption string,
+	markup tgbotapi.InlineKeyboardMarkup) (int64, error) {
 	b.SendChatAction(chatID, actionUploadPhoto)
 
 	photo := tgbotapi.NewPhoto(chatID, tgbotapi.FileBytes{Bytes: png})
-	if replyTo != 0 {
-		photo.ReplyToMessageID = replyTo
+	photo.Caption = clampCaption(caption)
+	photo.ParseMode = tgbotapi.ModeMarkdownV2
+	if len(markup.InlineKeyboard) > 0 {
+		photo.ReplyMarkup = markup
 	}
 	sent, err := b.api.Send(photo)
 	if err != nil {
-		return 0, fmt.Errorf("发送图片失败：%w", err)
+		return 0, fmt.Errorf("发送图片消息失败：%w", err)
 	}
 	return sent.MessageID, nil
 }
@@ -184,8 +186,7 @@ func (b *Bot) SendTextWithKeyboardID(chatID int64, text string, markup tgbotapi.
 //
 // ⚠ Telegram 的坑（实测踩过）：editMessageText 只要请求里不带 reply_markup，
 // 就会把消息上已有的内联键盘**删掉**（不是「保持不动」）。所以想保留按钮就必须每次
-// 把当前键盘一起传过来；想清掉按钮就传一个空键盘。入群验证的进度刷新走的就是前者 ——
-// 第一版这里传了 nil，结果新成员点一下，整排方向按钮就没了。
+// 把当前键盘一起传过来；想清掉按钮就传一个空键盘。
 func (b *Bot) EditText(chatID int64, messageID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error {
 	edit := tgbotapi.EditMessageTextConfig{
 		BaseEdit:  tgbotapi.BaseEdit{ChatID: chatID, MessageID: int(messageID), ReplyMarkup: &markup},
@@ -194,6 +195,20 @@ func (b *Bot) EditText(chatID int64, messageID int64, text string, markup tgbota
 	}
 	if _, err := b.api.Request(edit); err != nil {
 		return fmt.Errorf("更新验证消息失败：%w", err)
+	}
+	return nil
+}
+
+// EditCaption 改图片消息的说明与键盘，语义与 EditText 完全一致（同一个 reply_markup 的坑）：
+// 入群验证的题面图把提示文本放在 caption 上，刷新进度就走这里。
+func (b *Bot) EditCaption(chatID int64, messageID int64, caption string, markup tgbotapi.InlineKeyboardMarkup) error {
+	edit := tgbotapi.EditMessageCaptionConfig{
+		BaseEdit:  tgbotapi.BaseEdit{ChatID: chatID, MessageID: int(messageID), ReplyMarkup: &markup},
+		Caption:   clampCaption(caption),
+		ParseMode: tgbotapi.ModeMarkdownV2,
+	}
+	if _, err := b.api.Request(edit); err != nil {
+		return fmt.Errorf("更新验证图片说明失败：%w", err)
 	}
 	return nil
 }

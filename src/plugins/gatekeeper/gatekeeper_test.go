@@ -23,6 +23,7 @@ type sentMessage struct {
 	ChatID    int64
 	MessageID int64
 	Text      string
+	Caption   string
 	Buttons   int
 }
 
@@ -111,9 +112,11 @@ func (f *fakeTelegram) MemberIsAdmin(chatID, userID int64) (bool, error) {
 
 func (f *fakeTelegram) UserBio(userID int64) string { return f.bios[userID] }
 
-func (f *fakeTelegram) SendPhotoID(chatID int64, png []byte, replyTo int64) (int64, error) {
+// SendPhotoWithKeyboardID 记一条「图 + 说明 + 按钮」的验证消息（验证消息的正常形态）。
+func (f *fakeTelegram) SendPhotoWithKeyboardID(chatID int64, png []byte, caption string,
+	markup tgbotapi.InlineKeyboardMarkup) (int64, error) {
 	id := f.takeID()
-	f.photos = append(f.photos, sentMessage{ChatID: chatID, MessageID: id})
+	f.photos = append(f.photos, sentMessage{ChatID: chatID, MessageID: id, Caption: caption, Buttons: len(markup.InlineKeyboard)})
 	return id, nil
 }
 
@@ -139,6 +142,13 @@ func (f *fakeTelegram) EditText(chatID, messageID int64, text string,
 	markup tgbotapi.InlineKeyboardMarkup) error {
 	// 记下按钮行数：刷新进度时键盘必须跟着传回去，否则 Telegram 会把按钮删掉。
 	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Text: text, Buttons: len(markup.InlineKeyboard)})
+	return nil
+}
+
+// EditCaption 与 EditText 同源：图形态下刷新进度走这条（记录到同一个 edits 列表里）。
+func (f *fakeTelegram) EditCaption(chatID, messageID int64, caption string,
+	markup tgbotapi.InlineKeyboardMarkup) error {
+	f.edits = append(f.edits, sentMessage{ChatID: chatID, MessageID: messageID, Caption: caption, Buttons: len(markup.InlineKeyboard)})
 	return nil
 }
 
@@ -338,7 +348,8 @@ func TestRegisterHooksAllProcessors(t *testing.T) {
 	}
 }
 
-// TestGroupVerificationPasses 校验群内验证的正路：禁言 → 发题面图与提示 → 点完指令 → 解除禁言并清理消息。
+// TestGroupVerificationPasses 校验群内验证的正路：禁言 → 发一条「题面图 + 说明 + 按钮」→
+// 点完指令 → 解除禁言并清理消息。
 func TestGroupVerificationPasses(t *testing.T) {
 	h := newHarness(t, Config{Mode: ModeDirect, ShowAnswer: true, Attempts: 1}, fakeRenderer{png: []byte("png")})
 	member := tgbotapi.User{ID: 7, FirstName: "新兵"}
@@ -349,31 +360,28 @@ func TestGroupVerificationPasses(t *testing.T) {
 	if len(h.telegram.restricted) != 1 {
 		t.Fatalf("新成员应先被禁言，实际 %v", h.telegram.restricted)
 	}
-	// 题面图一条、提示文本一条：图是静态的题面，交互状态在文本上。
+	// 一条消息搞定：题面图 + 提示（说明）+ 按钮，不再分两条发。
 	if len(h.telegram.photos) != 1 {
-		t.Fatalf("应发一张题面图，实际 %d 张", len(h.telegram.photos))
+		t.Fatalf("应发一条带说明的题面消息，实际 %d 条", len(h.telegram.photos))
 	}
-	if got := h.telegram.photos[0].ChatID; got != 100 {
-		t.Errorf("题面图应发在目标群，实际 %d", got)
+	if len(h.telegram.prompts) != 0 {
+		t.Fatalf("合并成一条后不该再有单独的提示文本，实际 %d 条", len(h.telegram.prompts))
 	}
-	if len(h.telegram.prompts) != 1 {
-		t.Fatalf("应发一条提示文本，实际 %d 条", len(h.telegram.texts))
-	}
-	prompt := h.telegram.prompts[0]
+	prompt := h.telegram.photos[0]
 	if prompt.ChatID != 100 || prompt.Buttons != 2 {
-		t.Errorf("提示文本应发在目标群并带两行按钮（方向 + 管理员）：%+v", prompt)
+		t.Errorf("题面消息应发在目标群并带两行按钮（方向 + 管理员）：%+v", prompt)
 	}
-	if !strings.Contains(prompt.Text, "进度") || !strings.Contains(prompt.Text, "剩余机会") {
-		t.Errorf("提示里应有进度与剩余机会：%q", prompt.Text)
+	if !strings.Contains(prompt.Caption, "进度") || !strings.Contains(prompt.Caption, "剩余机会") {
+		t.Errorf("说明里应有进度与剩余机会：%q", prompt.Caption)
 	}
-	if strings.Contains(prompt.Text, "召唤指令：") {
-		// 图在，答案就印在图里；文本里不该再重复一遍答案。
-		t.Errorf("有题面图时不该在文本里重复答案：%q", prompt.Text)
+	if strings.Contains(prompt.Caption, "召唤指令：") {
+		// 图在，答案就印在图里；说明里不该再重复一遍答案。
+		t.Errorf("有题面图时不该在说明里重复答案：%q", prompt.Caption)
 	}
 
 	session := h.session(t, 100, member.ID)
-	if session.PhotoID == 0 {
-		t.Error("会话应记住题面图的消息 id（收尾时一起删）")
+	if !session.HasPhoto {
+		t.Error("会话应记住这条验证消息是「图 + 说明」形态")
 	}
 	if len(h.images.asks) != 1 || h.images.asks[0] != session.Challenge.Target().ID {
 		t.Errorf("题面图应取自这道题的战备，实际 %v", h.images.asks)
@@ -391,9 +399,9 @@ func TestGroupVerificationPasses(t *testing.T) {
 	if _, ok := h.handler.sessions.get(100, member.ID); ok {
 		t.Error("通过后会话应被清理")
 	}
-	// 题面图、提示文本、入群系统消息，三条都要删掉。
-	if len(h.telegram.deleted) < 3 {
-		t.Errorf("应删掉题面图、提示文本与入群系统消息，实际 %v", h.telegram.deleted)
+	// 验证消息与入群系统消息两条都要删掉。
+	if len(h.telegram.deleted) < 2 {
+		t.Errorf("应删掉验证消息与入群系统消息，实际 %v", h.telegram.deleted)
 	}
 	if !h.logsContain("验证通过") {
 		t.Errorf("审计里应有「验证通过」：%v", h.logs)
@@ -487,17 +495,17 @@ func TestApprovalVerificationApproves(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(h.telegram.photos) != 1 {
-		t.Fatalf("应私聊发一张题面图，实际 %d 张", len(h.telegram.photos))
+		t.Fatalf("应私聊发一条「图 + 说明」验证消息，实际 %d 条", len(h.telegram.photos))
 	}
 	if got := h.telegram.photos[0].ChatID; got != user.ID {
-		t.Errorf("申请模式的题面图应发在用户私聊：%+v", h.telegram.photos[0])
+		t.Errorf("申请模式的验证消息应发在用户私聊：%+v", h.telegram.photos[0])
 	}
-	if len(h.telegram.prompts) != 1 {
-		t.Fatalf("应私聊发一条提示文本，实际 %d 条", len(h.telegram.texts))
+	if len(h.telegram.prompts) != 0 {
+		t.Fatalf("合并成一条后不该再有单独的提示文本：%+v", h.telegram.prompts)
 	}
-	prompt := h.telegram.prompts[0]
+	prompt := h.telegram.photos[0]
 	if prompt.ChatID != user.ID || prompt.Buttons != 1 {
-		t.Errorf("私聊提示只该有方向按钮，不该有管理员按钮：%+v", prompt)
+		t.Errorf("私聊验证只该有方向按钮，不该有管理员按钮：%+v", prompt)
 	}
 	if len(h.telegram.restricted) != 0 {
 		t.Error("申请模式不该对申请人做禁言（他还不在群里）")
@@ -726,10 +734,13 @@ func TestApprovalVerificationUsesUserChatID(t *testing.T) {
 		t.Fatal(err)
 	}
 	if len(h.telegram.photos) != 1 || h.telegram.photos[0].ChatID != 70007 {
-		t.Fatalf("题面图应发到 user_chat_id=70007：%+v", h.telegram.photos)
+		t.Fatalf("验证消息（图 + 说明）应发到 user_chat_id=70007：%+v", h.telegram.photos)
 	}
-	if len(h.telegram.prompts) != 1 || h.telegram.prompts[0].ChatID != 70007 {
-		t.Fatalf("提示文本应发到 user_chat_id=70007：%+v", h.telegram.prompts)
+	if len(h.telegram.prompts) != 0 {
+		t.Fatalf("合并成一条后不该再有单独的提示文本：%+v", h.telegram.prompts)
+	}
+	if !strings.Contains(h.telegram.photos[0].Caption, "进度") {
+		t.Errorf("说明里应有进度：%q", h.telegram.photos[0].Caption)
 	}
 
 	// 在私聊里点完整串指令；回调来自 user_chat_id 那个会话，按用户 id 仍要能找到验证。
@@ -743,16 +754,14 @@ func TestApprovalVerificationUsesUserChatID(t *testing.T) {
 	if len(h.telegram.approved) != 1 || h.telegram.approved[0] != applicant.ID {
 		t.Fatalf("批准申请应按群 + 用户 id 走群接口：%v", h.telegram.approved)
 	}
-	for _, id := range []int64{session.PhotoID, session.MessageID} {
-		removed := false
-		for _, item := range h.telegram.deleted {
-			if item == [2]int64{70007, id} {
-				removed = true
-			}
+	removed := false
+	for _, item := range h.telegram.deleted {
+		if item == [2]int64{70007, session.MessageID} {
+			removed = true
 		}
-		if !removed {
-			t.Errorf("私聊消息（id=%d）应从 user_chat_id=70007 删除：%v", id, h.telegram.deleted)
-		}
+	}
+	if !removed {
+		t.Errorf("私聊里的验证消息（id=%d）应从 user_chat_id=70007 删除：%v", session.MessageID, h.telegram.deleted)
 	}
 }
 
@@ -830,7 +839,7 @@ func TestApprovalModeManualApproveCancelsVerification(t *testing.T) {
 		t.Fatal(err)
 	}
 	session := h.session(t, 100, applicant.ID)
-	pmPhotoID, pmPromptID := session.PhotoID, session.MessageID
+	pmMessageID := session.MessageID
 
 	// 管理员手动批准：Telegram 会送来一条「新成员进群」。
 	if err := h.handler.OnNewMembers(newMemberUpdate(100, applicant, nil)); err != nil {
@@ -842,16 +851,14 @@ func TestApprovalModeManualApproveCancelsVerification(t *testing.T) {
 	if len(h.telegram.declined) != 0 {
 		t.Errorf("不该拒绝申请（人已经在群里了）：%v", h.telegram.declined)
 	}
-	for _, id := range []int64{pmPhotoID, pmPromptID} {
-		removed := false
-		for _, item := range h.telegram.deleted {
-			if item == [2]int64{applicant.ID, id} {
-				removed = true
-			}
+	removed := false
+	for _, item := range h.telegram.deleted {
+		if item == [2]int64{applicant.ID, pmMessageID} {
+			removed = true
 		}
-		if !removed {
-			t.Errorf("私聊里那条消息（id=%d）应被清理：%v", id, h.telegram.deleted)
-		}
+	}
+	if !removed {
+		t.Errorf("私聊里那条消息（id=%d）应被清理：%v", pmMessageID, h.telegram.deleted)
 	}
 
 	// 验证的定时器到点也不该再动作。
@@ -1014,8 +1021,8 @@ func TestAdminActionRequiresAdmin(t *testing.T) {
 	}
 }
 
-// TestImageOrRenderFailureStillPrompts 校验题面图出不来时提示照发：
-// 渲染失败与图下载失败都只影响题面，答案这时补在文本里，验证流程不受影响。
+// TestImageOrRenderFailureStillPrompts 校验题面图出不来时退成纯文本验证消息：
+// 渲染失败与图下载失败都只影响图，答案这时补在文本里，验证流程与按钮完全不受影响。
 func TestImageOrRenderFailureStillPrompts(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1037,7 +1044,10 @@ func TestImageOrRenderFailureStillPrompts(t *testing.T) {
 				t.Error("题面图不可用时不该发图")
 			}
 			if len(h.telegram.prompts) != 1 {
-				t.Fatalf("提示文本照发，实际 %d 条", len(h.telegram.texts))
+				t.Fatalf("纯文本验证消息照发，实际 %d 条", len(h.telegram.prompts))
+			}
+			if h.telegram.prompts[0].Buttons != 2 {
+				t.Errorf("退成纯文本时按钮照旧两行：%+v", h.telegram.prompts[0])
 			}
 			text := h.telegram.prompts[0].Text
 			if !strings.Contains(text, "呼叫演练") || !strings.Contains(text, "进度") {
@@ -1047,10 +1057,10 @@ func TestImageOrRenderFailureStillPrompts(t *testing.T) {
 				t.Errorf("没有题面图时答案应补在文本里：%q", text)
 			}
 			session := h.session(t, 100, member.ID)
-			if session.PhotoID != 0 {
-				t.Error("没发出图时会话里的 PhotoID 应为 0")
+			if session.HasPhoto {
+				t.Error("没发出图时会话不该标记成「图 + 说明」形态")
 			}
-			// 点对第一步：改造应走文本编辑刷新进度。
+			// 点对第一步：这种形态走文本编辑刷新进度。
 			h.click(t, 100, session.MessageID, member, session.Challenge.Target().Steps[0])
 			if len(h.telegram.edits) != 1 || !strings.Contains(h.telegram.edits[0].Text, "进度") {
 				t.Errorf("应用文本接口刷新进度：%+v", h.telegram.edits)
@@ -1081,8 +1091,11 @@ func TestHiddenAnswerStaysHidden(t *testing.T) {
 	if err := h.handler.OnNewMembers(newMemberUpdate(100, member, nil)); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(h.telegram.prompts[0].Text, "召唤指令：") {
-		t.Errorf("硬核模式不该把答案写进文本：%q", h.telegram.prompts[0].Text)
+	if strings.Contains(h.telegram.photos[0].Caption, "召唤指令：") {
+		t.Errorf("硬核模式不该把答案写进说明：%q", h.telegram.photos[0].Caption)
+	}
+	if len(h.telegram.prompts) != 0 {
+		t.Errorf("图发出去了就不该再有纯文本兜底：%+v", h.telegram.prompts)
 	}
 	card := h.handler.buildCard(h.session(t, 100, member.ID).Challenge.Target())
 	if card.ShowSteps || len(card.Steps) != 0 {

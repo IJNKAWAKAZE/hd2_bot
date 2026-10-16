@@ -212,7 +212,12 @@ func (f *fakeGatekeeper) AnswerCallback(string, string, bool) {}
 func (f *fakeGatekeeper) DeleteMessage(int64, int64) error { return nil }
 func (f *fakeGatekeeper) IsTargetChat(int64) bool { return true }
 func (f *fakeGatekeeper) TargetChatID() int64 { return f.groupID }
-func (f *fakeGatekeeper) SendPhotoID(int64, []byte, int64) (int64, error) { return 1, nil }
+func (f *fakeGatekeeper) SendPhotoWithKeyboardID(int64, []byte, string, tgbotapi.InlineKeyboardMarkup) (int64, error) {
+	return 1, nil
+}
+func (f *fakeGatekeeper) EditCaption(int64, int64, string, tgbotapi.InlineKeyboardMarkup) error {
+	return nil
+}
 func (f *fakeGatekeeper) SendTextWithKeyboardID(int64, string, tgbotapi.InlineKeyboardMarkup) (int64, error) {
 	return 1, nil
 }

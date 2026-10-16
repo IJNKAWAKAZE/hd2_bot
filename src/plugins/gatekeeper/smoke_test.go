@@ -74,9 +74,9 @@ func TestVerifyCardSmokeWithRealBrowser(t *testing.T) {
 			t.Fatalf("写出图片失败：%v", err)
 		}
 		t.Logf("题面图：%s（%d 字节，题目=%s，有图=%v）", path, len(png), card.TargetName, card.Image != "")
-		// 顺带把随图发出的提示文本打出来：冒烟时一眼能看到新成员实际读到的文案。
-		// 这里把 PhotoID 先填上，模拟「图已经发出去了」的状态 —— 那种情况下答案只在图里，文本不重复。
-		session.PhotoID = 1
-		t.Logf("提示文本（MarkdownV2 源，图已发出时）：\n%s", handler.promptText(session))
+		// 顺带把随图发出的说明（提示文本）打出来：冒烟时一眼能看到新成员实际读到的文案。
+		// 这里先标成「图 + 说明」形态，模拟图已经发出去的状态 —— 那种情况下答案只在图里，说明不重复。
+		session.HasPhoto = true
+		t.Logf("说明（MarkdownV2 源，图已发出时）：\n%s", handler.promptText(session))
 	}
 }

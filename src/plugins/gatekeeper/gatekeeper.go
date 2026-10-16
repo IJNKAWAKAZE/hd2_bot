@@ -67,12 +67,15 @@ type Telegram interface {
 	MemberIsAdmin(chatID, userID int64) (bool, error)
 	UserBio(userID int64) string
 
-	SendPhotoID(chatID int64, png []byte, replyTo int64) (int64, error)
+	// SendPhotoWithKeyboardID 把「题面图 + 提示说明 + 按钮」发成一条消息，返回消息 id。
+	SendPhotoWithKeyboardID(chatID int64, png []byte, caption string, markup tgbotapi.InlineKeyboardMarkup) (int64, error)
 	SendTextWithKeyboardID(chatID int64, text string, markup tgbotapi.InlineKeyboardMarkup) (int64, error)
 	SendText(chatID int64, text string) error
 	// SendTemporaryText 发一条到点自动删除的文本（欢迎消息可配自动清理）。
 	SendTemporaryText(chatID int64, text string, delay time.Duration) error
 	EditText(chatID int64, messageID int64, text string, markup tgbotapi.InlineKeyboardMarkup) error
+	// EditCaption 与 EditText 相同，但改的是图片消息的说明（图形态下的进度刷新）。
+	EditCaption(chatID int64, messageID int64, caption string, markup tgbotapi.InlineKeyboardMarkup) error
 	DeleteMessage(chatID, messageID int64) error
 	AnswerCallback(queryID, text string, alert bool)
 
@@ -506,20 +509,24 @@ func (h *Handler) pickTarget() (Target, error) {
 	return target, nil
 }
 
-// sendChallenge 发一次验证：先发题面图（战备图标 + 名字 + 召唤指令），
-// 再把「提示 + 进度 + 按钮」作为单独一条文本消息发出去。
+// sendChallenge 发一次验证：**一条消息** —— 题面图 + 提示文本（作为图片说明）+ 按钮。
 //
-// 为什么分两条：图只当题面（不承担交互状态），进度、剩余机会、按钮都在文本消息上，
-// 编辑文本比编辑图片说明更自由，也不会受 caption 1024 字的限制。
-// 图取不到或渲染失败只影响题面，提示与按钮照发 —— 验证流程不依赖图片。
+// 题面图出不来时（没配渲染器、图标下载失败、渲染失败、发图失败）退成纯文本消息：
+// 内容与按钮完全一样，只是少了图，答案这时补在文本里 —— 验证不依赖图片。
 func (h *Handler) sendChallenge(session *Session) error {
 	chatID := session.MessageChat()
 	if png, err := h.renderChallenge(session); err != nil {
 		h.log("[gatekeeper] 题面图不可用，只发提示文本：%v", err)
-	} else if messageID, err := h.telegram.SendPhotoID(chatID, png, 0); err != nil {
-		h.log("[gatekeeper] 题面图发送失败，只发提示文本：%v", err)
 	} else {
-		session.PhotoID = messageID
+		// 图能出：答案已经印在图上了，说明里就不再重复（promptText 看 HasPhoto）。
+		session.HasPhoto = true
+		messageID, err := h.telegram.SendPhotoWithKeyboardID(chatID, png, h.promptText(session), h.keyboard(session))
+		if err == nil {
+			session.MessageID = messageID
+			return nil
+		}
+		h.log("[gatekeeper] 题面图发送失败，改发提示文本：%v", err)
+		session.HasPhoto = false
 	}
 	messageID, err := h.telegram.SendTextWithKeyboardID(chatID, h.promptText(session), h.keyboard(session))
 	if err != nil {
@@ -554,23 +561,30 @@ func (h *Handler) renderChallenge(session *Session) ([]byte, error) {
 	return h.renderer.Render(ctx, render.Card{Name: cardTemplateName, Data: card})
 }
 
-// refreshPrompt 刷新提示文本上的进度，并把键盘一起传回去。
+// refreshPrompt 刷新那条验证消息上的进度，并把键盘一起传回去。
 //
-// Telegram 的 editMessageText 不带 reply_markup 时会把已有键盘删掉，所以这里必须每次都把
-// 方向按钮重新挂上 —— 否则点一下整排按钮就消失（第一版踩过这个坑）。
+// Telegram 的 editMessageText / editMessageCaption 不带 reply_markup 时会把已有键盘删掉，
+// 所以这里必须每次都把方向按钮重新挂上 —— 否则点一下整排按钮就消失（第一版踩过这个坑）。
+// 图形态编辑说明、纯文本形态编辑文本，两者语义完全一致。
 // 刷新失败只记日志：用户还能继续点，只是看不到进度。
 func (h *Handler) refreshPrompt(session *Session) {
 	if session.MessageID == 0 {
 		return
 	}
-	if err := h.telegram.EditText(session.MessageChat(), session.MessageID, h.promptText(session), h.keyboard(session)); err != nil {
+	chatID, messageID := session.MessageChat(), session.MessageID
+	var err error
+	if session.HasPhoto {
+		err = h.telegram.EditCaption(chatID, messageID, h.promptText(session), h.keyboard(session))
+	} else {
+		err = h.telegram.EditText(chatID, messageID, h.promptText(session), h.keyboard(session))
+	}
+	if err != nil {
 		h.log("[gatekeeper] 刷新验证进度失败：%v", err)
 	}
 }
 
-// cleanup 删掉这次验证留下的消息：题面图、提示文本，以及群里那条入群系统消息。
+// cleanup 删掉这次验证留下的消息：验证消息本身，以及群里那条入群系统消息。
 func (h *Handler) cleanup(session *Session) {
-	h.deleteMessage(session.MessageChat(), session.PhotoID)
 	h.deleteMessage(session.MessageChat(), session.MessageID)
 	h.deleteMessage(session.ChatID, session.JoinID)
 }
